@@ -8,6 +8,8 @@ let adapter, device;
 // 28-31: vec2f resolution, vec2f padding
 // total 32 * f32 = 128 bytes
 
+// 2*f32 amplitude and wavelength
+
 const uniformStruct = `
     struct Uniforms {
       invMatrix: mat4x4f, // inverse proj*view matrix
@@ -42,13 +44,14 @@ uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
 
 async function main() {
 
-  let maxComputeInvocationsPerWorkgroup, f32filterable;
+  let maxComputeInvocationsPerWorkgroup, maxBufferSize, f32filterable;
 
   // WebGPU Setup
   if (!device) {
     adapter = await navigator.gpu?.requestAdapter();
 
     maxComputeInvocationsPerWorkgroup = adapter.limits.maxComputeInvocationsPerWorkgroup;
+    maxBufferSize = adapter.limits.maxBufferSize;
     f32filterable = adapter.features.has("float32-filterable");
 
     device = await adapter?.requestDevice({
@@ -57,7 +60,8 @@ async function main() {
         (f32filterable ? "float32-filterable" : ""),
       ],
       requiredLimits: {
-        maxComputeInvocationsPerWorkgroup: maxComputeInvocationsPerWorkgroup
+        maxComputeInvocationsPerWorkgroup: maxComputeInvocationsPerWorkgroup,
+        maxBufferSize: maxBufferSize,
       }
     });
   }
@@ -101,6 +105,8 @@ async function main() {
     label: "wavespeed texture",
   });
 
+  
+  circleAperture();
   device.queue.writeTexture(
     { texture: speedTex },
     waveSpeedData,
@@ -115,7 +121,7 @@ async function main() {
 
 
   // time for wave generator
-  const timeBuffer = device.createBuffer({
+  timeBuffer = device.createBuffer({
     size: Float32Array.BYTES_PER_ELEMENT,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     label: "timeBuffer"
@@ -197,7 +203,10 @@ async function main() {
 
         // read the wave speed
         let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
-        let frac = (cdt - 1) / (cdt + 1);
+        if (cdt <= 0) {
+          textureStore(past_future, gid, vec4f(0));
+          return;
+        }
 
         // compute the new value based on the wave equation
         var newValue = 2 * presentValue - pastValue + cdt * cdt * laplacian;
@@ -205,13 +214,13 @@ async function main() {
         // Wave generators
         let waveGen = 1 * sin(time * 6.28f / 8);
         // plane wave
-        // if (gid.x == 2) {
-        //   newValue = waveGen;
-        // }
-        // point source
-        if (all(gid == vec3u(18, volSize.y / 2, volSize.z / 2))) {
-          newValue = 100 * waveGen;
+        if (gid.x == 2) {
+          newValue = waveGen;
         }
+        // point source
+        // if (all(gid == vec3u(18, volSize.y / 2, volSize.z / 2))) {
+        //   newValue = 100 * waveGen;
+        // }
         
         // if (uniforms.waveOn == 1) {
         //   let waveGen = uniforms.amp * sin(time * 6.28f / uniforms.wavelength);
@@ -326,6 +335,7 @@ async function main() {
 
         // read the wave speed
         let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
+        if (cdt <= 0) { return; }
         let frac = (cdt - 1) / (cdt + 1);
 
         var newValue = futureValue;
@@ -388,7 +398,8 @@ async function main() {
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var stateTexture: texture_3d<f32>;
-      @group(0) @binding(2) var stateSampler: sampler;
+      @group(0) @binding(2) var speedTexture: texture_3d<f32>;
+      @group(0) @binding(3) var stateSampler: sampler;
 
       struct VertexOut {
         @builtin(position) position: vec4<f32>,
@@ -410,8 +421,7 @@ async function main() {
 
       // value to color: cyan -> blue -> transparent (0) -> red -> yellow
       fn transferFn(value: f32) -> vec4f {
-        let ga = abs(value) * 0.5;
-        return clamp(vec4f(value, ga - 0.5, -value, min(ga, 0.01)), vec4f(0), vec4f(1));
+        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, value * value * 0.1), vec4f(0), vec4f(1,1,1,.01));
       }
 
       fn rayBoxIntersect(start: vec3f, dir: vec3f) -> vec2f {
@@ -473,17 +483,32 @@ async function main() {
         var color = vec4f(0);
 
         for (var i = t0; i < intersection.y; i += rayDt) {
-          var sampleColor = transferFn(textureSampleLevel(stateTexture, stateSampler, rayPos / uni.volSizeNorm, 0).r);
-          // var sampleColor = transferFn(rayPos.x);
-          sampleColor.a = 1.0 - pow(1.0 - sampleColor.a, uni.rayDtMult); // adjust alpha for blending
+          let samplePos = rayPos / uni.volSizeNorm;
+          rayPos += rayDir * rayDt;
 
+          var barrier = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
+          if (barrier <= 0.0) { // opaque barrier
+            let newAlpha = (1.0 - color.a) * 0.2;
+            color += vec4f(newAlpha * vec3f(0.1), newAlpha);
+            break;
+          }
+          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
+          if (sampleValue == 0.0) { continue; } // skip empty samples
+
+          var sampleColor = transferFn(sampleValue);
+
+          sampleColor.a = 1.0 - pow(1.0 - sampleColor.a, uni.rayDtMult); // adjust alpha for blending
           let newAlpha = (1.0 - color.a) * sampleColor.a;
 
           color += vec4f(newAlpha * sampleColor.rgb, newAlpha);
 
+          // blend sample color with accumulated color using over operator
+          // if (sampleColor.a <= 0.0) { continue; } // skip fully transparent samples
+          // let a = sampleColor.a * (1 - color.a);
+          // color = vec4f((color.rgb * color.a + sampleColor.rgb * a) / (color.a + a), color.a + a);
+
           // exit if almost opaque
           if (color.a >= 0.95) { break; }
-          rayPos += rayDir * rayDt;
         }
 
         return linear2srgb(color);
@@ -520,7 +545,8 @@ async function main() {
     entries: [
       { binding: 0, resource: { buffer: uniformBuffer } },
       { binding: 1, resource: tex.createView() },
-      { binding: 2, resource: sampler },
+      { binding: 2, resource: speedTex.createView() },
+      { binding: 3, resource: sampler },
     ],
   });
 

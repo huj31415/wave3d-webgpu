@@ -2,9 +2,11 @@ let dt = 0.5;
 let oldDt;
 
 // simulation domain size [x, y, z]
-const simulationDomain = [384, 256, 256];
+const simulationDomain = [512, 256, 384];
 const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulationDomain));
 const waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
+
+let timeBuffer;
 
 const canvas = document.getElementById("canvas");
 
@@ -66,6 +68,7 @@ let rafId, intId;
 ui.restartSim.addEventListener("click", () => {
   cancelAnimationFrame(rafId);
   clearInterval(intId);
+  device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
   // device.destroy();
   // device = null;
   main();
@@ -123,8 +126,9 @@ Number.prototype.toDeg = function () { return this / Math.PI * 180; }
 const randRange = (min, max) => Math.random() * (max - min) + min;
 const randMax = (max) => Math.random() * max;
 
-
-
+const index3d = (x, y, z) => {
+  return x + simulationDomain[0] * (y + z * simulationDomain[1]);
+}
 
 function assert(cond, msg = '') {
   if (!cond) {
