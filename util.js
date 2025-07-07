@@ -1,8 +1,8 @@
 let dt = 0.5;
 let oldDt;
 
-// simulation domain size [x, y, z]
-const simulationDomain = [512, 256, 384];
+// simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
+const simulationDomain = [384, 256, 256];
 const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulationDomain));
 const waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
 

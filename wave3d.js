@@ -97,6 +97,13 @@ async function main() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "state texture 1",
   });
+  const projectionTex = device.createTexture({
+    size: simulationDomain,
+    dimension: "3d",
+    format: "r32float",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
+    label: "projection texture",
+  });
   const speedTex = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
@@ -106,7 +113,8 @@ async function main() {
   });
 
   
-  circleAperture();
+  quadSymmetricFlatBarrier(symmetricPresets.circleAperture, 64, 2, [32]);
+
   device.queue.writeTexture(
     { texture: speedTex },
     waveSpeedData,
@@ -212,7 +220,7 @@ async function main() {
         var newValue = 2 * presentValue - pastValue + cdt * cdt * laplacian;
 
         // Wave generators
-        let waveGen = 1 * sin(time * 6.28f / 8);
+        let waveGen = 1 * sin(time * 6.28f / 6);
         // plane wave
         if (gid.x == 2) {
           newValue = waveGen;
@@ -280,6 +288,11 @@ async function main() {
         vec3i(0, 0,  1)  // front
       );
 
+      fn mur1stOrder(gid_i: vec3i, index: u32, frac: f32) -> f32 {
+        let idx = gid_i + directions[index];
+        return textureLoad(present, idx).r + frac * (textureLoad(future, idx).r - textureLoad(future, gid_i).r);
+      }
+
       // 3d wave compute shader
       @compute @workgroup_size(WG_X, WG_Y, WG_Z)
       fn main(
@@ -292,10 +305,6 @@ async function main() {
         // check if the index is within bounds
         if (any(gid >= volSize)) { return; }
 
-        // read the states
-        let presentValue = textureLoad(present, gid).r;
-        let futureValue = textureLoad(future, gid).r;
-
         let adjIndex = array<vec3i, 6>(
           gid_i + directions[0], // left
           gid_i + directions[1], // right
@@ -303,25 +312,6 @@ async function main() {
           gid_i + directions[3], // up
           gid_i + directions[4], // back
           gid_i + directions[5]  // front
-        );
-
-        // 7 point stencil for laplacian
-        let adjArrayPresent = array<f32, 6>(
-          textureLoad(present, adjIndex[0]).r, // left
-          textureLoad(present, adjIndex[1]).r, // right
-          textureLoad(present, adjIndex[2]).r, // down
-          textureLoad(present, adjIndex[3]).r, // up
-          textureLoad(present, adjIndex[4]).r, // back
-          textureLoad(present, adjIndex[5]).r  // front
-        );
-
-        let adjArrayFuture = array<f32, 6>(
-          textureLoad(future, adjIndex[0]).r, // left
-          textureLoad(future, adjIndex[1]).r, // right
-          textureLoad(future, adjIndex[2]).r, // down
-          textureLoad(future, adjIndex[3]).r, // up
-          textureLoad(future, adjIndex[4]).r, // back
-          textureLoad(future, adjIndex[5]).r  // front
         );
 
         let adjSpeeds = array<f32, 6>(
@@ -338,38 +328,47 @@ async function main() {
         if (cdt <= 0) { return; }
         let frac = (cdt - 1) / (cdt + 1);
 
-        var newValue = futureValue;
+        var boundaryValue = 0.0;
+        var boundaryCount = 0;
 
         // apply boundary conditions
         // xn
         if (gid.x == 0 || adjSpeeds[0] < 0) {
-          newValue = adjArrayPresent[1] + frac * (adjArrayFuture[1] - newValue);
+          boundaryValue += mur1stOrder(gid_i, 1, frac);
+          boundaryCount += 1;
         }
         // xp
         if (gid.x == volSize.x - 1 || adjSpeeds[1] < 0) {
-          newValue = adjArrayPresent[0] + frac * (adjArrayFuture[0] - newValue);
+          boundaryValue += mur1stOrder(gid_i, 0, frac);
+          boundaryCount += 1;
         }
 
         // yn
         if (gid.y == 0 || adjSpeeds[2] < 0) {
-          newValue = adjArrayPresent[3] + frac * (adjArrayFuture[3] - newValue);
+          boundaryValue += mur1stOrder(gid_i, 3, frac);
+          boundaryCount += 1;
         }
         // yp
         if (gid.y == volSize.y - 1 || adjSpeeds[3] < 0) {
-          newValue = adjArrayPresent[2] + frac * (adjArrayFuture[2] - newValue);
+          boundaryValue += mur1stOrder(gid_i, 2, frac);
+          boundaryCount += 1;
         }
 
         // zn
         if (gid.z == 0 || adjSpeeds[4] < 0) {
-          newValue = adjArrayPresent[5] + frac * (adjArrayFuture[5] - newValue);
+          boundaryValue += mur1stOrder(gid_i, 5, frac);
+          boundaryCount += 1;
         }
         // zp
         if (gid.z == volSize.z - 1 || adjSpeeds[5] < 0) {
-          newValue = adjArrayPresent[4] + frac * (adjArrayFuture[4] - newValue);
+          boundaryValue += mur1stOrder(gid_i, 4, frac);
+          boundaryCount += 1;
         }
+
+        if (boundaryCount == 0) { return; }
         
         // write to the past/future texture
-        textureStore(future, gid, vec4f(newValue, 0.0, 0.0, 0.0));
+        textureStore(future, gid, vec4f(boundaryValue / f32(boundaryCount), 0.0, 0.0, 0.0));
       }
     `,
     label: "boundary compute module"
@@ -498,7 +497,8 @@ async function main() {
           var sampleColor = transferFn(sampleValue);
 
           sampleColor.a = 1.0 - pow(1.0 - sampleColor.a, uni.rayDtMult); // adjust alpha for blending
-          let newAlpha = (1.0 - color.a) * sampleColor.a;
+          var newAlpha = (1.0 - color.a) * sampleColor.a;
+          if (samplePos.x >= 1 - 1 / uni.volSize.x) { newAlpha = 1; } // end screen
 
           color += vec4f(newAlpha * sampleColor.rgb, newAlpha);
 
@@ -650,7 +650,7 @@ async function main() {
   uni.dtValue.set([dt]);
   uni.volSizeValue.set(simulationDomain);
   uni.volSizeNormValue.set(simulationDomainNorm);
-  uni.rayDtMultValue.set([1]);
+  uni.rayDtMultValue.set([2]);
   uni.resValue.set([canvas.width, canvas.height]);
 
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
