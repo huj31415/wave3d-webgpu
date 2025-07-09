@@ -1,6 +1,8 @@
 let dt = 0.5;
 let oldDt;
 
+let intensityFilterStrength = 1e3;
+
 // simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
 const simulationDomain = [384, 256, 256];
 const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulationDomain));
@@ -32,9 +34,7 @@ const uiIDs = [
   "camAz",
   "toggleSim",
   "restartSim",
-  "export",
-  "import",
-  "bufferInput"
+  "intensity"
 ];
 
 const ui = {};
@@ -84,6 +84,11 @@ ui.toggleSettings.addEventListener("click", () => {
     ui.toggleSettings.classList.add("inactive");
   }
 });
+
+ui.intensity.addEventListener("click", (event) => {
+  intensityFilterStrength = event.target.checked ? 1e3 : 0;
+  uni.intensityFilterValue.set([intensityFilterStrength]);
+})
 
 // timing
 let jsTime = 0, lastFrameTime = performance.now(), deltaTime = 10, fps = 0,

@@ -5,7 +5,7 @@ let adapter, device;
 // 16-19: vec3f cameraPos, f32 dt
 // 20-23: vec3f volSize, f32 rayDelta
 // 24-27: vec3f volSizeNorm, f32 padding
-// 28-31: vec2f resolution, vec2f padding
+// 28-31: vec2f resolution, f32 intensityFilter, f32 padding
 // total 32 * f32 = 128 bytes
 
 // 2*f32 amplitude and wavelength
@@ -19,6 +19,7 @@ const uniformStruct = `
       rayDtMult: f32,     // raymarch sampling factor
       volSizeNorm: vec3f, // normalized volume size (volSize / max(volSize))
       resolution: vec2f,  // canvas resolution: x-width, y-height
+      intensityFilter: f32
     };
   `;
 
@@ -31,6 +32,7 @@ const kVolSizeOffset = 20;
 const kRayDtMultOffset = 23;
 const kVolSizeNormOffset = 24;
 const kResOffset = 28;
+const kIntensityFilterOffset = 30;
 
 const uni = {};
 
@@ -41,6 +43,7 @@ uni.volSizeValue = uniformValues.subarray(kVolSizeOffset, kVolSizeOffset + 3);
 uni.rayDtMultValue = uniformValues.subarray(kRayDtMultOffset, kRayDtMultOffset + 1);
 uni.volSizeNormValue = uniformValues.subarray(kVolSizeNormOffset, kVolSizeNormOffset + 3);
 uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
+uni.intensityFilterValue = uniformValues.subarray(kIntensityFilterOffset, kIntensityFilterOffset + 1);
 
 async function main() {
 
@@ -97,12 +100,12 @@ async function main() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "state texture 1",
   });
-  const projectionTex = device.createTexture({
+  const intensityTex = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
-    label: "projection texture",
+    label: "intensity texture",
   });
   const speedTex = device.createTexture({
     size: simulationDomain,
@@ -112,7 +115,7 @@ async function main() {
     label: "wavespeed texture",
   });
 
-  
+
   quadSymmetricFlatBarrier(symmetricPresets.circleAperture, 64, 2, [32]);
 
   device.queue.writeTexture(
@@ -147,6 +150,7 @@ async function main() {
       @group(0) @binding(2) var present:      texture_storage_3d<r32float, read>;
       @group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
       @group(0) @binding(4) var<storage, read_write> time: f32;
+      @group(0) @binding(5) var intensity:    texture_storage_3d<r32float, read_write>;
 
       const WG_X: u32 = ${wg_x};
       const WG_Y: u32 = ${wg_y};
@@ -180,9 +184,30 @@ async function main() {
         // check if the index is within bounds
         if (any(gid >= volSize)) { return; }
 
+        // run wave generator
+        if (true) {
+          // Wave generators
+          let waveGen = 1 * sin(time * 6.28f / 6);
+
+          // plane wave
+          if (gid.x == 2) {
+            // write to the past/future texture
+            textureStore(past_future, gid, vec4f(waveGen, 0.0, 0.0, 0.0));
+            return;
+          }
+
+          // point source
+          // if (all(gid == vec3u(18, volSize.y / 2, volSize.z / 2))) {
+          //   // write to the past/future texture
+          //   textureStore(past_future, gid, vec4f(100 * waveGen, 0.0, 0.0, 0.0));
+          //   return;
+          // }
+        }
+
         // read the states
         let pastValue = textureLoad(past_future, gid).r;
         let presentValue = textureLoad(present, gid).r;
+
 
         let adjIndex = array<vec3i, 6>(
           gid_i + directions[0], // left
@@ -217,18 +242,16 @@ async function main() {
         }
 
         // compute the new value based on the wave equation
-        var newValue = 2 * presentValue - pastValue + cdt * cdt * laplacian;
+        let newValue = 2 * presentValue - pastValue + cdt * cdt * laplacian;
 
-        // Wave generators
-        let waveGen = 1 * sin(time * 6.28f / 6);
-        // plane wave
-        if (gid.x == 2) {
-          newValue = waveGen;
+        // write to the past/future texture
+        textureStore(past_future, gid, vec4f(newValue, 0.0, 0.0, 0.0));
+
+        // write to intensity texture
+        if (uni.intensityFilter > 0) {
+          let current = textureLoad(intensity, gid);
+          textureStore(intensity, gid, current + (newValue * newValue - current) / uni.intensityFilter);
         }
-        // point source
-        // if (all(gid == vec3u(18, volSize.y / 2, volSize.z / 2))) {
-        //   newValue = 100 * waveGen;
-        // }
         
         // if (uniforms.waveOn == 1) {
         //   let waveGen = uniforms.amp * sin(time * 6.28f / uniforms.wavelength);
@@ -241,8 +264,6 @@ async function main() {
         //   }
         // }
         
-        // write to the past/future texture
-        textureStore(past_future, gid, vec4f(newValue, 0.0, 0.0, 0.0));
       }
     `,
     label: "wave compute module"
@@ -261,7 +282,8 @@ async function main() {
       { binding: 1, resource: tex0.createView() },
       { binding: 2, resource: tex1.createView() },
       { binding: 3, resource: speedTex.createView() },
-      { binding: 4, resource: { buffer: timeBuffer } }
+      { binding: 4, resource: { buffer: timeBuffer } },
+      { binding: 5, resource: intensityTex.createView() },
     ],
     label: "wave compute bind group"
   });
@@ -420,7 +442,13 @@ async function main() {
 
       // value to color: cyan -> blue -> transparent (0) -> red -> yellow
       fn transferFn(value: f32) -> vec4f {
-        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, value * value * 0.1), vec4f(0), vec4f(1,1,1,.01));
+        let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
+        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1,1,1,1));
+      }
+
+      fn intensityTransferFn(value: f32) -> vec4f {
+        let a = 1.0 - pow(1.0 - clamp(value, 0, 0.001), uni.rayDtMult);
+        return clamp(10 * vec4f(value, value, value, a), vec4f(0), vec4f(1,1,1,1));
       }
 
       fn rayBoxIntersect(start: vec3f, dir: vec3f) -> vec2f {
@@ -480,6 +508,7 @@ async function main() {
         var rayPos = rayOrigin + (t0 + offset) * rayDir;
 
         var color = vec4f(0);
+        let renderIntensity = uni.intensityFilter > 0;
 
         for (var i = t0; i < intersection.y; i += rayDt) {
           let samplePos = rayPos / uni.volSizeNorm;
@@ -494,11 +523,16 @@ async function main() {
           let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
           if (sampleValue == 0.0) { continue; } // skip empty samples
 
-          var sampleColor = transferFn(sampleValue);
+          var sampleColor = vec4f(0);
 
-          sampleColor.a = 1.0 - pow(1.0 - sampleColor.a, uni.rayDtMult); // adjust alpha for blending
+          if (renderIntensity) {
+            sampleColor = intensityTransferFn(sampleValue);
+          } else {
+            sampleColor = transferFn(sampleValue);
+          }
+
           var newAlpha = (1.0 - color.a) * sampleColor.a;
-          if (samplePos.x >= 1 - 1 / uni.volSize.x) { newAlpha = 1; } // end screen
+          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { newAlpha = 0.5; } // end screen
 
           color += vec4f(newAlpha * sampleColor.rgb, newAlpha);
 
@@ -611,7 +645,7 @@ async function main() {
 
     const renderPass = renderTimingHelper.beginRenderPass(encoder, renderPassDescriptor);
     renderPass.setPipeline(renderPipeline);
-    renderPass.setBindGroup(0, renderBindGroup(tex0));
+    renderPass.setBindGroup(0, renderBindGroup(intensityFilterStrength > 0 ? intensityTex : tex0));
     renderPass.draw(3, 1, 0, 0);
     renderPass.end();
 
@@ -652,6 +686,7 @@ async function main() {
   uni.volSizeNormValue.set(simulationDomainNorm);
   uni.rayDtMultValue.set([2]);
   uni.resValue.set([canvas.width, canvas.height]);
+  uni.intensityFilterValue.set([intensityFilterStrength]);
 
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
 
