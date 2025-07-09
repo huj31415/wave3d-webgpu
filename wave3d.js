@@ -1,50 +1,5 @@
 let adapter, device;
 
-// uniform layout
-// 00-15: mat4x4f inv proj*view
-// 16-19: vec3f cameraPos, f32 dt
-// 20-23: vec3f volSize, f32 rayDelta
-// 24-27: vec3f volSizeNorm, f32 padding
-// 28-31: vec2f resolution, f32 intensityFilter, f32 padding
-// total 32 * f32 = 128 bytes
-
-// 2*f32 amplitude and wavelength
-
-const uniformStruct = `
-    struct Uniforms {
-      invMatrix: mat4x4f, // inverse proj*view matrix
-      cameraPos: vec3f,   // camera position in world space
-      dt: f32,            // simulation time step
-      volSize: vec3f,     // volume size in voxels
-      rayDtMult: f32,     // raymarch sampling factor
-      volSizeNorm: vec3f, // normalized volume size (volSize / max(volSize))
-      resolution: vec2f,  // canvas resolution: x-width, y-height
-      intensityFilter: f32
-    };
-  `;
-
-const uniformValues = new Float32Array(32);
-
-const kMatrixOffset = 0;
-const kCamPosOffset = 16;
-const kDtOffset = 19;
-const kVolSizeOffset = 20;
-const kRayDtMultOffset = 23;
-const kVolSizeNormOffset = 24;
-const kResOffset = 28;
-const kIntensityFilterOffset = 30;
-
-const uni = {};
-
-uni.matrixValue = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
-uni.cameraPosValue = uniformValues.subarray(kCamPosOffset, kCamPosOffset + 3);
-uni.dtValue = uniformValues.subarray(kDtOffset, kDtOffset + 1);
-uni.volSizeValue = uniformValues.subarray(kVolSizeOffset, kVolSizeOffset + 3);
-uni.rayDtMultValue = uniformValues.subarray(kRayDtMultOffset, kRayDtMultOffset + 1);
-uni.volSizeNormValue = uniformValues.subarray(kVolSizeNormOffset, kVolSizeNormOffset + 3);
-uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
-uni.intensityFilterValue = uniformValues.subarray(kIntensityFilterOffset, kIntensityFilterOffset + 1);
-
 async function main() {
 
   let maxComputeInvocationsPerWorkgroup, maxBufferSize, f32filterable;
@@ -107,7 +62,7 @@ async function main() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "intensity texture",
   });
-  const speedTex = device.createTexture({
+  speedTex = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
@@ -116,14 +71,9 @@ async function main() {
   });
 
 
-  quadSymmetricFlatBarrier(symmetricPresets.circleAperture, 64, 2, [32]);
-
-  device.queue.writeTexture(
-    { texture: speedTex },
-    waveSpeedData,
-    { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
-    { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
-  );
+  // symmetricFlatBarrier(flatPresets.squareAperture, 64, 2, { radius: 32 });
+  symmetricFlatBarrier(flatPresets.zonePlateCircular, 64, 2, { f: 64, nCutouts: 10 });
+  // symmetricLens(lensPresets.parabolic, 64, 24, 80, 1.5, 0, true);
 
   const uniformBuffer = device.createBuffer({
     size: uniformValues.byteLength,
@@ -156,13 +106,49 @@ async function main() {
       const WG_Y: u32 = ${wg_y};
       const WG_Z: u32 = ${wg_z};
 
+      // const directions: array<vec3i, 26> = array<vec3i, 26>(
+      //   // 00-05 orthogonal directions (cubic faces)
+      //   vec3i(-1,  0,  0), // xn
+      //   vec3i( 1,  0,  0), // xp
+      //   vec3i( 0, -1,  0), // yn
+      //   vec3i( 0,  1,  0), // yp
+      //   vec3i( 0,  0, -1), // zn
+      //   vec3i( 0,  0,  1), // zp
+
+      //   // 06-17 planar diagonals (cubic edges)
+      //   vec3i(-1, -1,  0), // xnyn
+      //   vec3i(-1,  1,  0), // xnyp
+      //   vec3i( 1, -1,  0), // xpyn
+      //   vec3i( 1,  1,  0), // xpyp
+
+      //   vec3i(-1,  0, -1), // xnzn
+      //   vec3i(-1,  0,  1), // xnzp
+      //   vec3i( 1,  0, -1), // xpzn
+      //   vec3i( 1,  0,  1), // xpzp
+
+      //   vec3i( 0, -1, -1), // ynzn
+      //   vec3i( 0, -1,  1), // ynzp
+      //   vec3i( 0,  1, -1), // ypzn
+      //   vec3i( 0,  1,  1), // ypzp
+
+      //   // 18-25 nonplanar diagonals (cubic corners)
+      //   vec3i(-1, -1, -1), // xnynzn
+      //   vec3i(-1, -1,  1), // xnynzp
+      //   vec3i(-1,  1, -1), // xnypzn
+      //   vec3i(-1,  1,  1), // xnypzp
+      //   vec3i( 1, -1, -1), // xpynzn
+      //   vec3i( 1, -1,  1), // xpynzp
+      //   vec3i( 1,  1, -1), // xpypzn
+      //   vec3i( 1,  1,  1), // xpypzp
+      // );
       const directions: array<vec3i, 6> = array<vec3i, 6>(
-        vec3i(-1, 0, 0), // left
-        vec3i( 1, 0, 0), // right
-        vec3i(0, -1, 0), // down
-        vec3i(0,  1, 0), // up
-        vec3i(0, 0, -1), // back
-        vec3i(0, 0,  1)  // front
+        // 00-05 orthogonal directions (cubic faces)
+        vec3i(-1,  0,  0), // xn
+        vec3i( 1,  0,  0), // xp
+        vec3i( 0, -1,  0), // yn
+        vec3i( 0,  1,  0), // yp
+        vec3i( 0,  0, -1), // zn
+        vec3i( 0,  0,  1), // zp
       );
 
       // var<workgroup> presentTile: array<f32, (WG_X + 2) * (WG_Y + 2) * (WG_Z + 2)>;
@@ -183,11 +169,18 @@ async function main() {
 
         // check if the index is within bounds
         if (any(gid >= volSize)) { return; }
+        
+        // read the wave speed and write 0 if barrier
+        let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
+        if (cdt <= 0) {
+          textureStore(past_future, gid, vec4f(0));
+          return;
+        }
 
-        // run wave generator
+        // wave generator
         if (true) {
           // Wave generators
-          let waveGen = 1 * sin(time * 6.28f / 6);
+          let waveGen = uni.waveSettings.x * sin(time * 6.28f / uni.waveSettings.y);
 
           // plane wave
           if (gid.x == 2) {
@@ -197,9 +190,9 @@ async function main() {
           }
 
           // point source
-          // if (all(gid == vec3u(18, volSize.y / 2, volSize.z / 2))) {
+          // if (all(gid == vec3u(2, volSize.y / 2, volSize.z / 2))) {
           //   // write to the past/future texture
-          //   textureStore(past_future, gid, vec4f(100 * waveGen, 0.0, 0.0, 0.0));
+          //   textureStore(past_future, gid, vec4f(200 * waveGen, 0.0, 0.0, 0.0));
           //   return;
           // }
         }
@@ -208,38 +201,25 @@ async function main() {
         let pastValue = textureLoad(past_future, gid).r;
         let presentValue = textureLoad(present, gid).r;
 
-
-        let adjIndex = array<vec3i, 6>(
-          gid_i + directions[0], // left
-          gid_i + directions[1], // right
-          gid_i + directions[2], // down
-          gid_i + directions[3], // up
-          gid_i + directions[4], // back
-          gid_i + directions[5]  // front
-        );
-
-        // 7 point stencil for laplacian
-        let adjArrayPresent = array<f32, 6>(
-          textureLoad(present, adjIndex[0]).r, // left
-          textureLoad(present, adjIndex[1]).r, // right
-          textureLoad(present, adjIndex[2]).r, // down
-          textureLoad(present, adjIndex[3]).r, // up
-          textureLoad(present, adjIndex[4]).r, // back
-          textureLoad(present, adjIndex[5]).r  // front
-        );
-
         var laplacian = -6.0 * presentValue;
-
+        
         for (var i = 0; i < 6; i++) {
-          laplacian += adjArrayPresent[i];
+          laplacian += textureLoad(present, gid_i + directions[i]).r;
         }
 
-        // read the wave speed
-        let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
-        if (cdt <= 0) {
-          textureStore(past_future, gid, vec4f(0));
-          return;
-        }
+        // var laplacian = -88.0 * presentValue;
+
+        // for (var i = 0; i < 6; i++) {
+        //   laplacian += 6 * textureLoad(present, gid_i + directions[i]).r;
+        // }
+        // for (var i = 6; i < 18; i++) {
+        //   laplacian += 3 * textureLoad(present, gid_i + directions[i]).r;
+        // }
+        // for (var i = 18; i < 26; i++) {
+        //   laplacian += 2 * textureLoad(present, gid_i + directions[i]).r;
+        // }
+
+        // laplacian /= 26;
 
         // compute the new value based on the wave equation
         let newValue = 2 * presentValue - pastValue + cdt * cdt * laplacian;
@@ -327,6 +307,10 @@ async function main() {
         // check if the index is within bounds
         if (any(gid >= volSize)) { return; }
 
+        // read the wave speed
+        let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
+        if (cdt <= 0) { return; }
+
         let adjIndex = array<vec3i, 6>(
           gid_i + directions[0], // left
           gid_i + directions[1], // right
@@ -344,10 +328,6 @@ async function main() {
           textureLoad(waveSpeed, adjIndex[4]).r, // back
           textureLoad(waveSpeed, adjIndex[5]).r  // front
         );
-
-        // read the wave speed
-        let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
-        if (cdt <= 0) { return; }
         let frac = (cdt - 1) / (cdt + 1);
 
         var boundaryValue = 0.0;
@@ -446,9 +426,11 @@ async function main() {
         return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1,1,1,1));
       }
 
+      // value to grayscale
       fn intensityTransferFn(value: f32) -> vec4f {
-        let a = 1.0 - pow(1.0 - clamp(value, 0, 0.001), uni.rayDtMult);
-        return clamp(10 * vec4f(value, value, value, a), vec4f(0), vec4f(1,1,1,1));
+        let newValue = -exp(-value) + 1;
+        let a = 1.0 - pow(1.0 - newValue * 0.05, uni.rayDtMult);
+        return clamp(0.5 * vec4f(newValue, newValue, newValue, a), vec4f(0), vec4f(1,1,1,1));
       }
 
       fn rayBoxIntersect(start: vec3f, dir: vec3f) -> vec2f {
@@ -475,7 +457,7 @@ async function main() {
         let cutoff = color.rgb < vec3f(0.0031308);
         let higher = 1.055 * pow(color.rgb, vec3f(1.0 / 2.4)) - 0.055;
         let lower = 12.92 * color.rgb;
-        return vec4f(mix(higher, lower, vec3f(cutoff)), color.a);
+        return vec4f(select(higher, lower, cutoff), color.a);
       }
 
       @fragment
@@ -510,36 +492,31 @@ async function main() {
         var color = vec4f(0);
         let renderIntensity = uni.intensityFilter > 0;
 
-        for (var i = t0; i < intersection.y; i += rayDt) {
+        for (var i = t0; i < intersection.y; i += rayDt) { // increment ray directly?
           let samplePos = rayPos / uni.volSizeNorm;
           rayPos += rayDir * rayDt;
+          
+          var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
 
-          var barrier = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
-          if (barrier <= 0.0) { // opaque barrier
+          var sampleColor = select(vec4f(0.05), vec4f(0.0), speed == 1);
+
+          if (speed <= 0.0) { // opaque barrier
             let newAlpha = (1.0 - color.a) * 0.2;
             color += vec4f(newAlpha * vec3f(0.1), newAlpha);
             break;
           }
+          
           let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
-          if (sampleValue == 0.0) { continue; } // skip empty samples
 
-          var sampleColor = vec4f(0);
+          if (sampleValue == 0.0 && speed == 1) { continue; } // skip empty samples
 
-          if (renderIntensity) {
-            sampleColor = intensityTransferFn(sampleValue);
-          } else {
-            sampleColor = transferFn(sampleValue);
-          }
+          sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
 
           var newAlpha = (1.0 - color.a) * sampleColor.a;
-          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { newAlpha = 0.5; } // end screen
 
-          color += vec4f(newAlpha * sampleColor.rgb, newAlpha);
-
-          // blend sample color with accumulated color using over operator
-          // if (sampleColor.a <= 0.0) { continue; } // skip fully transparent samples
-          // let a = sampleColor.a * (1 - color.a);
-          // color = vec4f((color.rgb * color.a + sampleColor.rgb * a) / (color.a + a), color.a + a);
+          // project on +x face
+          color += vec4f(sampleColor.rgb, 1) * newAlpha
+            * select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
 
           // exit if almost opaque
           if (color.a >= 0.95) { break; }
@@ -672,11 +649,11 @@ async function main() {
   }
 
   intId = setInterval(() => {
-    ui.fps.textContent = fps.toFixed(1);
-    ui.jsTime.textContent = jsTime.toFixed(2);
-    ui.frameTime.textContent = deltaTime.toFixed(1);
-    ui.computeTime.textContent = (waveComputeTime + boundaryComputeTime).toFixed(3);
-    ui.renderTime.textContent = renderTime.toFixed(3);
+    gui.io.fps(fps);
+    gui.io.jsTime(jsTime);
+    gui.io.frameTime(deltaTime);
+    gui.io.computeTime((waveComputeTime + boundaryComputeTime));
+    gui.io.renderTime(renderTime);
   }, 100);
 
   camera.updatePosition();
@@ -686,7 +663,9 @@ async function main() {
   uni.volSizeNormValue.set(simulationDomainNorm);
   uni.rayDtMultValue.set([2]);
   uni.resValue.set([canvas.width, canvas.height]);
+  uni.ampValue.set([amp, wavelength]);
   uni.intensityFilterValue.set([intensityFilterStrength]);
+  uni.intensityMultValue.set([1]);
 
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
 
@@ -694,6 +673,7 @@ async function main() {
 }
 
 const camera = new Camera(defaults);
+
 
 
 main();

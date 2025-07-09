@@ -13,7 +13,7 @@ const minFOV = (10).toRad(), maxFOV = (120).toRad();
 const defaults = {
   // target: vec3.fromValues(0.5, 0.25, 0.25),
   target: vec3.scale(simulationDomainNorm, 0.5),//vec3.fromValues(0.5, 0.5, 0.5),
-  radius: 1.5,
+  distance: 1,
   position: vec3.create(),
   azimuth: 0,
   elevation: 0,
@@ -26,7 +26,7 @@ const defaults = {
 class Camera {
   constructor(defaults) {
     this.target = vec3.clone(defaults.target);
-    this.radius = defaults.radius;
+    this.distance = defaults.distance;
     this.position = vec3.clone(defaults.position);
     this.azimuth = defaults.azimuth;
     this.elevation = defaults.elevation;
@@ -65,16 +65,16 @@ class Camera {
     const x = Math.cos(this.elevation) * Math.sin(this.azimuth);
     const y = Math.sin(this.elevation);
     const z = Math.cos(this.elevation) * Math.cos(this.azimuth);
-    this.position = vec3.scaleAndAdd(this.target, [x, y, z], this.radius);
+    this.position = vec3.scaleAndAdd(this.target, [x, y, z], this.distance);
 
     this.updateMatrix();
 
-    ui.camFOV.textContent = this.fov.toDeg().toFixed(2);
-    ui.camDist.textContent = this.radius.toFixed(2);
-    ui.camTarget.textContent = vec3.toString(this.target);
-    ui.camPos.textContent = vec3.toString(this.position);
-    ui.camAlt.textContent = this.elevation.toDeg().toFixed(2);
-    ui.camAz.textContent = this.azimuth.toDeg().toFixed(2);
+    gui.io.camFOV(this.fov.toDeg().toFixed(2));
+    gui.io.camDist(this.distance.toFixed(2));
+    gui.io.camTarget(vec3.toString(this.target));
+    gui.io.camPos(vec3.toString(this.position));
+    gui.io.camAlt(this.elevation.toDeg().toFixed(2));
+    gui.io.camAz(this.azimuth.toDeg().toFixed(2));
   }
 
   orbit(dx, dy) {
@@ -87,7 +87,7 @@ class Camera {
   }
 
   pan(dx, dy) {
-    const adjustedPanSpeed = PAN_SPEED * this.radius * this.fov;
+    const adjustedPanSpeed = PAN_SPEED * this.distance * this.fov;
     const pan = vec3.scaleAndAdd(
       vec3.scale(this.viewRight, -dx * adjustedPanSpeed),
       this.viewUp,
@@ -99,7 +99,7 @@ class Camera {
   }
 
   zoom(delta) {
-    this.radius = ((delta + 1) * this.radius).clamp(this.near, this.far);
+    this.distance = ((delta + 1) * this.distance).clamp(this.near, this.far);
     this.updatePosition();
   }
 
@@ -109,15 +109,15 @@ class Camera {
   }
 
   adjFOVWithoutZoom(delta) {
-    const initial = Math.tan(this.fov / 2) * this.radius;
+    const initial = Math.tan(this.fov / 2) * this.distance;
     this.fov = (this.fov + delta).clamp(minFOV, maxFOV);
-    this.radius = initial / Math.tan(this.fov / 2);
+    this.distance = initial / Math.tan(this.fov / 2);
     this.updatePosition();
   }
 
   reset(e = { altKey: false, ctrlKey: false }) {
     this.fov = defaults.fov;
-    if (!e.ctrlKey) this.radius = defaults.radius;
+    if (!e.ctrlKey) this.distance = defaults.distance;
     if (!e.altKey && !e.ctrlKey) {
       this.azimuth = defaults.azimuth;
       this.elevation = defaults.elevation;
@@ -232,7 +232,7 @@ function keyCamera(e, val) {
   keyFOVWithoutZoom = e.altKey && zoom;
 }
 window.addEventListener("keydown", (e) => {
-  console.log(e.key);
+  // console.log(e.key);
   switch (e.key) {
     case "Alt":
       e.preventDefault();
