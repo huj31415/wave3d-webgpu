@@ -44,10 +44,11 @@ uni.volSizeValue = uniformValues.subarray(kVolSizeOffset, kVolSizeOffset + 3);
 uni.rayDtMultValue = uniformValues.subarray(kRayDtMultOffset, kRayDtMultOffset + 1);
 uni.volSizeNormValue = uniformValues.subarray(kVolSizeNormOffset, kVolSizeNormOffset + 3);
 uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
-uni.ampValue = uniformValues.subarray(kWaveSettingsOffset, kWaveSettingsOffset + 2);
+uni.waveSettingsValue = uniformValues.subarray(kWaveSettingsOffset, kWaveSettingsOffset + 2);
 uni.intensityFilterValue = uniformValues.subarray(kIntensityFilterOffset, kIntensityFilterOffset + 1);
 uni.intensityMultValue = uniformValues.subarray(kIntensityMultOffset, kIntensityMultOffset + 1);
 
+Object.freeze(uni);
 
 let dt = 0.5;
 let oldDt;
@@ -59,12 +60,22 @@ let amp = 1, wavelength = 6;
 
 // simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
 const simulationDomain = [384, 256, 256];
+let newDomainSize = [384, 256, 256];
 
 let yMidpt = Math.floor(simulationDomain[1] / 2);
 let zMidpt = Math.floor(simulationDomain[2] / 2);
 
 const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulationDomain));
-const waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
+let waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
+
+function resizeDomain(newSize) {
+  vec3.clone(newSize, simulationDomain);
+  vec3.clone(simulationDomain.map(v => v / Math.max(...simulationDomain)), simulationDomainNorm);
+  waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
+  yMidpt = Math.floor(simulationDomain[1] / 2);
+  zMidpt = Math.floor(simulationDomain[2] / 2);
+  camera.target = vec3.scale(simulationDomainNorm, 0.5);
+}
 
 let timeBuffer;
 
@@ -77,10 +88,10 @@ gui.addGroup("perf", "Performance");
 gui.addStringOutput("res", "Resolution", "", "perf");
 gui.addHalfWidthGroups("perfL", "perfR", "perf");
 gui.addNumericOutput("fps", "FPS", "", 1, "perfL");
-gui.addNumericOutput("frameTime", "Frame", "", 2, "perfL");
-gui.addNumericOutput("jsTime", "JS", "", 2, "perfL");
-gui.addNumericOutput("computeTime", "Compute", "", 2, "perfR");
-gui.addNumericOutput("renderTime", "Render", "", 2, "perfR");
+gui.addNumericOutput("frameTime", "Frame", "ms", 2, "perfL");
+gui.addNumericOutput("jsTime", "JS", "ms", 2, "perfL");
+gui.addNumericOutput("computeTime", "Compute", "ms", 2, "perfR");
+gui.addNumericOutput("renderTime", "Render", "ms", 2, "perfR");
 
 gui.addGroup("camState", "Camera state");
 gui.addNumericOutput("camFOV", "FOV", "°", 2, "camState");
@@ -90,11 +101,15 @@ gui.addStringOutput("camPos", "Pos", "", "camState");
 gui.addNDimensionalOutput(["camAlt", "camAz"], "Alt/az", "°", ", ", 2, "camState");
 
 gui.addGroup("simCtrl", "Sim controls");
-gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, 0.5, 2, "simCtrl", (value) => {
-  const newDt = value;
+gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, 0.5, 2, "simCtrl", (newDt) => {
   if (oldDt) oldDt = newDt;
   else dt = newDt;
 });
+gui.addNumericInput("xSize", true, "X size (restart)", 8, 512, 8, 384, 0, "simCtrl", (value) => newDomainSize[0] = value);
+gui.addNumericInput("ySize", true, "Y size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[1] = value);
+gui.addNumericInput("zSize", true, "Z size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[2] = value);
+gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.waveSettingsValue.set([amp, wavelength]); });
+gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = value; uni.waveSettingsValue.set([amp, wavelength]); });
 gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
   if (oldDt) {
     dt = oldDt;
@@ -104,20 +119,29 @@ gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
     dt = 0;
   }
 });
+
+// stops interpolating after restarting?
 gui.addButton("restartSim", "Restart", false, "simCtrl", () => {
   cancelAnimationFrame(rafId);
   clearInterval(intId);
+  resizeDomain(newDomainSize);
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
-  // device.destroy();
-  // device = null;
   main();
 });
 
+// gui.addGroup("presets", "Presets");
+// gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets");
+// gui.addNumericInput("radius", true, "Radius", 0, 512, 1, 16, 0, "presets", (value) => presetRadius = value);
+// gui.addDropdown("presetSelect", "Select preset", ["DoubleSlit", "Aperture", "ZonePlate", "Lens"], "presets", {"Aperture": ["shape", "radius"]});
+// gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 64, 0, "presets", (value) => presetXOffset = value);
+
 gui.addGroup("visCtrl", "Visualization controls");
+gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]));
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
   intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
   uni.intensityFilterValue.set([intensityFilterStrength]);
 });
+gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]));
 
 gui.addGroup("camKeybinds", "Camera controls",
   `<div>

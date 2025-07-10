@@ -1,5 +1,9 @@
 let speedTex;
 
+let presetRadius = 16;
+let presetXOffset = 64;
+
+
 function updateQuadSymmetry(x, yRel, zRel, newSpeed) {
   if (x < simulationDomain[0] && x >= 0
     && Math.abs(yRel) < yMidpt
@@ -22,6 +26,12 @@ function updateSpeedTexture(reset = false) {
   );
 }
 
+const shapes = Object.freeze({
+  circular: (y, z) => y * y + z * z,
+  linear: (y, z) => y * y,
+  square: (y, z) => Math.max(y * y, z * z)
+});
+
 const flatPresets = Object.freeze({
   doubleSlit: (y, z, args = { slitWidth: 8, slitSpacing: 64, slitHeight: 64 }) => (
     y > args.slitHeight / 2 // fill outside of slit area
@@ -29,26 +39,9 @@ const flatPresets = Object.freeze({
       && (z < (args.slitSpacing - args.slitWidth) / 2 || z > (args.slitSpacing + args.slitWidth) / 2)
     )
   ),
-  circleAperture: (y, z, args = { radius: 16 }) => y * y + z * z >= args.radius * args.radius,
-  squareAperture: (y, z, args = { radius: 16 }) => y >= args.radius || z >= args.radius,
-  zonePlateCircular: (y, z, args = { f: 32, nCutouts: 10 }) => {
-    const a = y * y + z * z;
-    const maxN = 2 * args.nCutouts;
-    const zone = (n) => n * wavelength * (args.f + n * wavelength / 4);
-    for (let n = 1; n <= maxN; n += 2)
-      if (a <= zone(n) && a >= zone(n - 1)) return true;
-    return a >= zone(maxN);
-  },
-  zonePlateLinear: (y, z, args = { f: 32, nCutouts: 10 }) => {
-    const a = y * y;
-    const maxN = 2 * args.nCutouts;
-    const zone = (n) => n * wavelength * (args.f + n * wavelength / 4);
-    for (let n = 1; n <= maxN; n += 2)
-      if (a <= zone(n) && a >= zone(n - 1)) return true;
-    return a >= zone(maxN);
-  },
-  zonePlateSquare: (y, z, args = { f: 32, nCutouts: 10 }) => {
-    const a = Math.max(y * y, z * z);
+  aperture: (y, z, args = { shape: shapes.circular, radius: 16 }) => args.shape(y, z) >= args.radius * args.radius,
+  zonePlate: (y, z, args = { shape: shapes.circular, f: 32, nCutouts: 10 }) => {
+    const a = args.shape(y, z);
     const maxN = 2 * args.nCutouts;
     const zone = (n) => n * wavelength * (args.f + n * wavelength / 4);
     for (let n = 1; n <= maxN; n += 2)
@@ -84,7 +77,7 @@ function symmetricLens(presetTest, distance = 64, thickness = 16, radius = 64, r
         let newSpeed = 1;
         if (presetTest(x, y, z, radius, halfThickness)) {
           newSpeed = 1 / refractiveIndex;
-        } else if (outerBarrier && flatPresets.circleAperture(y, z, radius) && x < 2) {
+        } else if (outerBarrier && flatPresets.circleAperture(y, z, { radius: radius }) && x < 2) {
           newSpeed = -1;
         }
         if (half >= 0) updateQuadSymmetry(distance + x, y, z, newSpeed);

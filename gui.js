@@ -77,7 +77,7 @@ class GUI {
 
     this.groups[group].append(label + ": ");
     this.groups[group].appendChild(span);
-    this.groups[group].append(suffix);
+    this.groups[group].append(" " + suffix);
     this.groups[group].appendChild(document.createElement("br"));
 
     this.io[id] = (val) => (span.innerText = val);
@@ -90,7 +90,7 @@ class GUI {
 
     this.groups[group].append(label + ": ");
     this.groups[group].appendChild(span);
-    this.groups[group].append(suffix);
+    this.groups[group].append(" " + suffix);
     this.groups[group].appendChild(document.createElement("br"));
 
     this.io[id] = (val) => (span.innerText = floatPrecision == 0 ? parseInt(val) : parseFloat(val).toFixed(floatPrecision));
@@ -104,7 +104,7 @@ class GUI {
       spans[i].id = id;
       this.io[id] = (val) => (spans[i].innerText = floatPrecision == 0 ? parseInt(val) : parseFloat(val).toFixed(floatPrecision));
       this.groups[group].appendChild(spans[i]);
-      this.groups[group].append(suffix + (i == ids.length - 1 ? "" : separator));
+      this.groups[group].append(" " + suffix + (i == ids.length - 1 ? "" : separator));
     });
     this.groups[group].appendChild(document.createElement("br"));
   }
@@ -120,7 +120,7 @@ class GUI {
 
     const valueSpan = document.createElement("span");
     valueSpan.id = id + "Value";
-    valueSpan.innerText = parseFloat(value).toFixed(2);
+    valueSpan.innerText = floatPrecision == 0 ? parseInt(value) : parseFloat(value).toFixed(2);
 
     const labelEl = document.createElement("label");
     labelEl.setAttribute("for", id);
@@ -135,7 +135,7 @@ class GUI {
     // this.io[id + "Value"] = valueSpan;
 
     input.addEventListener("input", () => {
-      valueSpan.innerText = parseFloat(input.value).toFixed(floatPrecision);
+      valueSpan.innerText = floatPrecision == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(floatPrecision);
       if (oninput) oninput(input.value);
     });
   }
@@ -175,7 +175,7 @@ class GUI {
     });
 
     labelEl.appendChild(select);
-    group.insertBefore(select, Object.entries(visibilityMap)[0]);
+    this.groups[group].insertBefore(select, this.io[Object.entries(visibilityMap)[0]]);
     select.after(document.createElement("br"));
 
     this.io[id] = select;
@@ -184,7 +184,7 @@ class GUI {
     select.addEventListener("change", () => {
       Object.entries(visibilityMap).forEach(([val, elements]) => {
         elements.forEach(el => {
-          if (typeof el === 'string') el = document.getElementById(el);
+          if (typeof el === 'string') el = this.io[el];
           if (el) el.style.display = (select.value === val) ? "" : "none";
         });
       });
@@ -209,7 +209,7 @@ class GUI {
   addRadioOptions(name, options = [], defaultValue = null, group = "parent") {
     const container = document.createElement("div");
 
-    options.forEach(({ label, value }) => {
+    options.forEach((value) => {
       const input = document.createElement("input");
       input.type = "radio";
       input.name = name;
@@ -219,7 +219,8 @@ class GUI {
 
       const labelEl = document.createElement("label");
       labelEl.setAttribute("for", input.id);
-      labelEl.innerText = label;
+      // labelEl.innerText = label;
+      labelEl.innerText = value;
 
       container.appendChild(input);
       container.appendChild(labelEl);

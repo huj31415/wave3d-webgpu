@@ -71,8 +71,8 @@ async function main() {
   });
 
 
-  // symmetricFlatBarrier(flatPresets.squareAperture, 64, 2, { radius: 32 });
-  symmetricFlatBarrier(flatPresets.zonePlateCircular, 64, 2, { f: 64, nCutouts: 10 });
+  symmetricFlatBarrier(flatPresets.zonePlate, 64, 2, { shape: shapes.circular, f: 192, nCutouts: 4 });
+  // symmetricFlatBarrier(flatPresets.zonePlateCircular, 64, 2, { f: 192, nCutouts: 5 });
   // symmetricLens(lensPresets.parabolic, 64, 24, 80, 1.5, 0, true);
 
   const uniformBuffer = device.createBuffer({
@@ -230,7 +230,7 @@ async function main() {
         // write to intensity texture
         if (uni.intensityFilter > 0) {
           let current = textureLoad(intensity, gid);
-          textureStore(intensity, gid, current + (newValue * newValue - current) / uni.intensityFilter);
+          textureStore(intensity, gid, current + (newValue * newValue - current) / (uni.intensityFilter + uni.waveSettings.y));
         }
         
         // if (uniforms.waveOn == 1) {
@@ -492,7 +492,7 @@ async function main() {
         var color = vec4f(0);
         let renderIntensity = uni.intensityFilter > 0;
 
-        for (var i = t0; i < intersection.y; i += rayDt) { // increment ray directly?
+        for (var i = t0; i < intersection.y; i += rayDt) {
           let samplePos = rayPos / uni.volSizeNorm;
           rayPos += rayDir * rayDt;
           
@@ -663,7 +663,7 @@ async function main() {
   uni.volSizeNormValue.set(simulationDomainNorm);
   uni.rayDtMultValue.set([2]);
   uni.resValue.set([canvas.width, canvas.height]);
-  uni.ampValue.set([amp, wavelength]);
+  uni.waveSettingsValue.set([amp, wavelength]);
   uni.intensityFilterValue.set([intensityFilterStrength]);
   uni.intensityMultValue.set([1]);
 
