@@ -68,6 +68,10 @@ let zMidpt = Math.floor(simulationDomain[2] / 2);
 const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulationDomain));
 let waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
 
+/**
+ * Resizes the simulation domain
+ * @param {Array<Number>} newSize New simulation domain size
+ */
 function resizeDomain(newSize) {
   vec3.clone(newSize, simulationDomain);
   vec3.clone(simulationDomain.map(v => v / Math.max(...simulationDomain)), simulationDomainNorm);
@@ -77,13 +81,30 @@ function resizeDomain(newSize) {
   camera.target = vec3.scale(simulationDomainNorm, 0.5);
 }
 
+/**
+ * Refreshes the active preset
+ */
+function refreshPreset() {
+  const presetType = gui.io.presetSelect.value;
+  switch (presetType) {
+    case "DoubleSlit":
+    case "Aperture":
+    case "ZonePlate":
+      symmetricFlatBarrier(flatPresets[presetType], presetXOffset, presetThickness, presetSettings[presetType]);
+      break;
+    case "Lens":
+      createLens(lensPresets[gui.io.lensType()], presetXOffset, presetSettings.Lens);
+      break;
+  }
+}
+
 let timeBuffer;
 
 const canvas = document.getElementById("canvas");
 
-
 const gui = new GUI("3D wave sim on WebGPU", canvas);
 
+// Performance section
 gui.addGroup("perf", "Performance");
 gui.addStringOutput("res", "Resolution", "", "perf");
 gui.addHalfWidthGroups("perfL", "perfR", "perf");
@@ -93,6 +114,7 @@ gui.addNumericOutput("jsTime", "JS", "ms", 2, "perfL");
 gui.addNumericOutput("computeTime", "Compute", "ms", 2, "perfR");
 gui.addNumericOutput("renderTime", "Render", "ms", 2, "perfR");
 
+// Camera state section
 gui.addGroup("camState", "Camera state");
 gui.addNumericOutput("camFOV", "FOV", "°", 2, "camState");
 gui.addNumericOutput("camDist", "Dst", "", 2, "camState");
@@ -100,14 +122,15 @@ gui.addStringOutput("camTarget", "Tgt", "", "camState");
 gui.addStringOutput("camPos", "Pos", "", "camState");
 gui.addNDimensionalOutput(["camAlt", "camAz"], "Alt/az", "°", ", ", 2, "camState");
 
+// Sim controls
 gui.addGroup("simCtrl", "Sim controls");
 gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, 0.5, 2, "simCtrl", (newDt) => {
   if (oldDt) oldDt = newDt;
   else dt = newDt;
 });
-gui.addNumericInput("xSize", true, "X size (restart)", 8, 512, 8, 384, 0, "simCtrl", (value) => newDomainSize[0] = value);
-gui.addNumericInput("ySize", true, "Y size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[1] = value);
-gui.addNumericInput("zSize", true, "Z size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[2] = value);
+gui.addNumericInput("xSize", false, "X size (restart)", 8, 512, 8, 384, 0, "simCtrl", (value) => newDomainSize[0] = value);
+gui.addNumericInput("ySize", false, "Y size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[1] = value);
+gui.addNumericInput("zSize", false, "Z size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[2] = value);
 gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.waveSettingsValue.set([amp, wavelength]); });
 gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = value; uni.waveSettingsValue.set([amp, wavelength]); });
 gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
@@ -125,16 +148,44 @@ gui.addButton("restartSim", "Restart", false, "simCtrl", () => {
   cancelAnimationFrame(rafId);
   clearInterval(intId);
   resizeDomain(newDomainSize);
+  refreshPreset();
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
   main();
 });
 
-// gui.addGroup("presets", "Presets");
-// gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets");
-// gui.addNumericInput("radius", true, "Radius", 0, 512, 1, 16, 0, "presets", (value) => presetRadius = value);
-// gui.addDropdown("presetSelect", "Select preset", ["DoubleSlit", "Aperture", "ZonePlate", "Lens"], "presets", {"Aperture": ["shape", "radius"]});
-// gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 64, 0, "presets", (value) => presetXOffset = value);
+// Preset controls
+gui.addGroup("presets", "Presets");
 
+gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets", (value) => presetSettings.Aperture.shape = presetSettings.ZonePlate.shape = shapes[value]);
+gui.addNumericInput("barrierThickness", true, "Thickness", 1, 16, 1, 2, 0, "presets", (value) => presetThickness = value)
+
+gui.addNumericInput("f", true, "Focal length", 4, 512, 1, 192, 0, "presets", (value) => presetSettings.ZonePlate.f = value);
+gui.addNumericInput("nCutouts", true, "# Cutouts", 1, 10, 1, 4, 0, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
+
+gui.addNumericInput("slitWidth", true, "Slit width", 3, 512, 1, 8, 0, "presets", (value) => presetSettings.DoubleSlit.slitWidth = value);
+gui.addNumericInput("slitSpacing", true, "Slit spacing", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
+gui.addNumericInput("slitHeight", true, "Slit height", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
+
+gui.addNumericInput("radius", true, "Radius", 0, 256, 1, 16, 0, "presets", (value) => presetSettings.Aperture.radius = presetSettings.Lens.radius = value);
+
+gui.addCheckbox("invert", "Invert barrier", false, "presets", (checked) => presetSettings.Aperture.invert = checked);
+
+gui.addRadioOptions("lensType", ["elliptical", "parabolic"], "parabolic", "presets");
+gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) => presetSettings.Lens.thickness = value);
+gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, 1.2, 2, "presets", (value) => presetSettings.Lens.refractiveIndex = value);
+gui.addNumericInput("halfLens", true, "Half lens", -1, 1, 1, 0, 0, "presets", (value) => presetSettings.Lens.half = value);
+gui.addCheckbox("outerBarrier", "Outer barrier", true, "presets", (checked) => presetSettings.Lens.outerBarrier = checked);
+
+gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens"], "presets", {
+  "ZonePlate": ["shape", "f", "nCutouts"],
+  "DoubleSlit": ["slitWidth", "slitSpacing", "slitHeight"],
+  "Aperture": ["shape", "radius", "invert"],
+  "Lens": ["radius", "lensType", "lensThickness", "refractiveIndex", "halfLens", "outerBarrier"],
+});
+gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 64, 0, "presets", (value) => presetXOffset = value);
+gui.addButton("updatePreset", "Load preset", true, "presets", refreshPreset);
+
+// Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");
 gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]));
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
@@ -143,6 +194,7 @@ gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) =
 });
 gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]));
 
+// Camera keybinds
 gui.addGroup("camKeybinds", "Camera controls",
   `<div>
     Orbit: leftclick / arrows
@@ -205,155 +257,19 @@ Number.prototype.toDeg = function () { return this / Math.PI * 180; }
  * @returns Random number between [min, max)
  */
 const randRange = (min, max) => Math.random() * (max - min) + min;
+
+/**
+ * Generates a random number within a range of 0-max
+ * @param {Number} max Upper bound, exclusive
+ * @returns Random number between [0, max)
+ */
 const randMax = (max) => Math.random() * max;
 
-const index3d = (x, y, z) => {
-  return x + simulationDomain[0] * (y + z * simulationDomain[1]);
-}
-
-function assert(cond, msg = '') {
-  if (!cond) {
-    throw new Error(msg);
-  }
-}
-
-// We track command buffers so we can generate an error if
-// we try to read the result before the command buffer has been executed.
-const s_unsubmittedCommandBuffer = new Set();
-
-/* global GPUQueue */
-GPUQueue.prototype.submit = (function (origFn) {
-  return function (commandBuffers) {
-    origFn.call(this, commandBuffers);
-    commandBuffers.forEach(cb => s_unsubmittedCommandBuffer.delete(cb));
-  };
-})(GPUQueue.prototype.submit);
-
-// See https://webgpufundamentals.org/webgpu/lessons/webgpu-timing.html
-class TimingHelper {
-  #canTimestamp;
-  #device;
-  #querySet;
-  #resolveBuffer;
-  #resultBuffer;
-  #commandBuffer;
-  #resultBuffers = [];
-  // state can be 'free', 'need resolve', 'wait for result'
-  #state = 'free';
-
-  constructor(device) {
-    this.#device = device;
-    this.#canTimestamp = device.features.has('timestamp-query');
-    if (this.#canTimestamp) {
-      this.#querySet = device.createQuerySet({
-        type: 'timestamp',
-        count: 2,
-      });
-      this.#resolveBuffer = device.createBuffer({
-        size: this.#querySet.count * 8,
-        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
-      });
-    }
-  }
-
-  #beginTimestampPass(encoder, fnName, descriptor) {
-    if (this.#canTimestamp) {
-      assert(this.#state === 'free', 'state not free');
-      this.#state = 'need resolve';
-
-      const pass = encoder[fnName]({
-        ...descriptor,
-        ...{
-          timestampWrites: {
-            querySet: this.#querySet,
-            beginningOfPassWriteIndex: 0,
-            endOfPassWriteIndex: 1,
-          },
-        },
-      });
-
-      const resolve = () => this.#resolveTiming(encoder);
-      const trackCommandBuffer = (cb) => this.#trackCommandBuffer(cb);
-      pass.end = (function (origFn) {
-        return function () {
-          origFn.call(this);
-          resolve();
-        };
-      })(pass.end);
-
-      encoder.finish = (function (origFn) {
-        return function () {
-          const cb = origFn.call(this);
-          trackCommandBuffer(cb);
-          return cb;
-        };
-      })(encoder.finish);
-
-      return pass;
-    } else {
-      return encoder[fnName](descriptor);
-    }
-  }
-
-  beginRenderPass(encoder, descriptor = {}) {
-    return this.#beginTimestampPass(encoder, 'beginRenderPass', descriptor);
-  }
-
-  beginComputePass(encoder, descriptor = {}) {
-    return this.#beginTimestampPass(encoder, 'beginComputePass', descriptor);
-  }
-
-  #trackCommandBuffer(cb) {
-    if (!this.#canTimestamp) {
-      return;
-    }
-    assert(this.#state === 'need finish', 'you must call encoder.finish');
-    this.#commandBuffer = cb;
-    s_unsubmittedCommandBuffer.add(cb);
-    this.#state = 'wait for result';
-  }
-
-  #resolveTiming(encoder) {
-    if (!this.#canTimestamp) {
-      return;
-    }
-    assert(
-      this.#state === 'need resolve',
-      'you must use timerHelper.beginComputePass or timerHelper.beginRenderPass',
-    );
-    this.#state = 'need finish';
-
-    this.#resultBuffer = this.#resultBuffers.pop() || this.#device.createBuffer({
-      size: this.#resolveBuffer.size,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    });
-
-    encoder.resolveQuerySet(this.#querySet, 0, this.#querySet.count, this.#resolveBuffer, 0);
-    encoder.copyBufferToBuffer(this.#resolveBuffer, 0, this.#resultBuffer, 0, this.#resultBuffer.size);
-  }
-
-  async getResult() {
-    if (!this.#canTimestamp) {
-      return 0;
-    }
-    assert(
-      this.#state === 'wait for result',
-      'you must call encoder.finish and submit the command buffer before you can read the result',
-    );
-    assert(!!this.#commandBuffer); // internal check
-    assert(
-      !s_unsubmittedCommandBuffer.has(this.#commandBuffer),
-      'you must submit the command buffer before you can read the result',
-    );
-    this.#commandBuffer = undefined;
-    this.#state = 'free';
-
-    const resultBuffer = this.#resultBuffer;
-    await resultBuffer.mapAsync(GPUMapMode.READ);
-    const times = new BigInt64Array(resultBuffer.getMappedRange());
-    const duration = Number(times[1] - times[0]);
-    resultBuffer.unmap();
-    this.#resultBuffers.push(resultBuffer);
-    return duration;
-  }
-}
+/**
+ * 
+ * @param {Number} x x coordinate
+ * @param {Number} y y coordinate
+ * @param {Number} z z coordinate
+ * @returns Linear index within simulation domain
+ */
+const index3d = (x, y, z) => x + simulationDomain[0] * (y + z * simulationDomain[1]);

@@ -69,11 +69,7 @@ async function main() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "wavespeed texture",
   });
-
-
-  symmetricFlatBarrier(flatPresets.zonePlate, 64, 2, { shape: shapes.circular, f: 192, nCutouts: 4 });
-  // symmetricFlatBarrier(flatPresets.zonePlateCircular, 64, 2, { f: 192, nCutouts: 5 });
-  // symmetricLens(lensPresets.parabolic, 64, 24, 80, 1.5, 0, true);
+  updateSpeedTexture();
 
   const uniformBuffer = device.createBuffer({
     size: uniformValues.byteLength,
@@ -674,6 +670,4 @@ async function main() {
 
 const camera = new Camera(defaults);
 
-
-
-main();
+main().then(() => symmetricFlatBarrier(flatPresets.ZonePlate, 64, 2, { shape: shapes.circular, f: 192, nCutouts: 4 }));
