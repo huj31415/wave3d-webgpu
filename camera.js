@@ -3,23 +3,22 @@ const PAN_SPEED = 0.001;
 const ZOOM_SPEED = 0.0005;
 const FOV_SPEED = 0.0002;
 
-const KEY_ROT_SPEED = 3;
-const KEY_PAN_SPEED = 5;
-const KEY_ZOOM_SPEED = 0.01;
-const KEY_FOV_SPEED = 0.005;
+const KEY_ROT_SPEED = 3 / 15;
+const KEY_PAN_SPEED = 5 / 15;
+const KEY_ZOOM_SPEED = 0.01 / 15;
+const KEY_FOV_SPEED = 0.005 / 15;
 
 const minFOV = (10).toRad(), maxFOV = (120).toRad();
 
 const defaults = {
-  // target: vec3.fromValues(0.5, 0.25, 0.25),
-  target: vec3.scale(simulationDomainNorm, 0.5),//vec3.fromValues(0.5, 0.5, 0.5),
+  target: vec3.scale(simulationDomainNorm, 0.5),
   distance: 1,
   position: vec3.create(),
   azimuth: 0,
   elevation: 0,
   fov: (60).toRad(),
   near: 0.1,
-  far: 1e5,
+  far: 100,
 }
 
 // camera state and interaction
@@ -86,13 +85,16 @@ class Camera {
     this.updatePosition();
   }
 
-  pan(dx, dy) {
+  pan(dx, dy, dz = 0) {
     const adjustedPanSpeed = PAN_SPEED * this.distance * this.fov;
     const pan = vec3.scaleAndAdd(
-      vec3.scale(this.viewRight, -dx * adjustedPanSpeed),
-      this.viewUp,
-      dy * adjustedPanSpeed
-    );
+      vec3.scaleAndAdd(
+        vec3.scale(this.viewRight, -dx * adjustedPanSpeed),
+        this.viewUp,
+        dy * adjustedPanSpeed
+      ),
+      this.viewDir,
+      dz * adjustedPanSpeed);
     this.target = vec3.add(this.target, pan);
     this.position = vec3.add(this.position, pan);
     this.updatePosition();
@@ -181,56 +183,49 @@ canvas.addEventListener('wheel', e => {
   }
 }, { passive: false });
 
-let orbup = false, orbdown = false, orbleft = false, orbright = false;
-let panup = false, pandown = false, panleft = false, panright = false;
-let zoomin = false, zoomout = false;
-let keyOrbit = false, keyPan = false, keyZoom = false, keyFOV = false, keyFOVWithoutZoom = false;
+const keyState = {
+  orbit: { up: false, down: false, left: false, right: false },
+  pan: { up: false, down: false, left: false, right: false, forward: false, backward: false },
+  zoom: { in: false, out: false }
+};
+
+let keyOrbit = false;
+let keyPan = false;
+let keyZoom = false;
+let keyFOV = false;
+let keyFOVWithoutZoom = false;
+
+const keyMap = {
+  ArrowUp: { type: "orbit", dir: "up" },
+  ArrowDown: { type: "orbit", dir: "down" },
+  ArrowLeft: { type: "orbit", dir: "left" },
+  ArrowRight: { type: "orbit", dir: "right" },
+  w: { type: "pan", dir: "forward" },
+  a: { type: "pan", dir: "left" },
+  s: { type: "pan", dir: "backward" },
+  d: { type: "pan", dir: "right" },
+  g: { type: "pan", dir: "up" },
+  v: { type: "pan", dir: "down" },
+  f: { type: "zoom", dir: "in" },
+  c: { type: "zoom", dir: "out" },
+};
 
 function keyCamera(e, val) {
-  if ((["w", "a", "s", "d", "f", "c"].includes(e.key) || e.key.includes("Arrow")) && e.target.tagName !== "INPUT") e.preventDefault();
-  else return;
+  if (!keyMap[e.key] || e.target.tagName === "INPUT" || (e.key === "r" && e.ctrlKey)) return;
 
-  switch (e.key) {
-    case "ArrowUp":
-      orbup = val;
-      break;
-    case "w":
-      panup = val;
-      break;
-    case "ArrowDown":
-      orbdown = val;
-      break;
-    case "s":
-      pandown = val;
-      break;
-    case "ArrowLeft":
-      orbleft = val;
-      break;
-    case "a":
-      panleft = val;
-      break;
-    case "ArrowRight":
-      orbright = val;
-      break;
-    case "d":
-      panright = val;
-      break;
-    case "f":
-      zoomin = val;
-      break;
-    case "c":
-      zoomout = val;
-      break;
-  }
+  e.preventDefault();
+  const { type, dir } = keyMap[e.key];
+  keyState[type][dir] = val;
 
-  const zoom = zoomin || zoomout;
+  const zoomActive = keyState.zoom.in || keyState.zoom.out;
 
-  keyOrbit = orbup || orbdown || orbleft || orbright;
-  keyPan = panup || pandown || panleft || panright;
-  keyZoom = !(e.ctrlKey || e.altKey) && zoom;
-  keyFOV = e.ctrlKey && zoom;
-  keyFOVWithoutZoom = e.altKey && zoom;
+  keyOrbit = Object.values(keyState.orbit).some(Boolean);
+  keyPan = Object.values(keyState.pan).some(Boolean);
+  keyZoom = !(e.ctrlKey || e.altKey) && zoomActive;
+  keyFOV = e.ctrlKey && zoomActive;
+  keyFOVWithoutZoom = e.altKey && zoomActive;
 }
+
 window.addEventListener("keydown", (e) => {
   // console.log(e.key);
   switch (e.key) {

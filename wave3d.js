@@ -22,6 +22,12 @@ async function main() {
         maxBufferSize: maxBufferSize,
       }
     });
+    device.addEventListener('uncapturederror', event => {
+      const msg = event.error.message;
+      if (msg.includes("max buffer size limit"))
+        alert(`Max buffer size exceeded. Your device supports max size ${maxBufferSize}, specified size ${simVoxelCount() * 4}`);
+      else alert(msg);
+    });
   }
   if (!device) {
     alert("Browser does not support WebGPU");
@@ -587,11 +593,29 @@ async function main() {
     fps += (1e3 / deltaTime - fps) / filterStrength;
     lastFrameTime = startTime;
 
-    if (keyOrbit) camera.orbit((orbleft - orbright) * KEY_ROT_SPEED, (orbup - orbdown) * KEY_ROT_SPEED);
-    if (keyPan) camera.pan((panleft - panright) * KEY_PAN_SPEED, (panup - pandown) * KEY_PAN_SPEED);
-    if (keyZoom) camera.zoom((zoomout - zoomin) * KEY_ZOOM_SPEED);
-    if (keyFOV) camera.adjFOV((zoomout - zoomin) * KEY_FOV_SPEED);
-    if (keyFOVWithoutZoom) camera.adjFOVWithoutZoom((zoomout - zoomin) * KEY_FOV_SPEED);
+    if (keyOrbit) {
+      camera.orbit(
+        (keyState.orbit.left - keyState.orbit.right) * KEY_ROT_SPEED * deltaTime,
+        (keyState.orbit.up - keyState.orbit.down) * KEY_ROT_SPEED * deltaTime
+      );
+    }
+    if (keyPan) {
+      camera.pan(
+        (keyState.pan.left - keyState.pan.right) * KEY_PAN_SPEED * deltaTime,
+        (keyState.pan.up - keyState.pan.down) * KEY_PAN_SPEED * deltaTime,
+        (keyState.pan.forward - keyState.pan.backward) * KEY_PAN_SPEED * deltaTime
+      );
+    }
+    if (keyZoom) {
+      camera.zoom((keyState.zoom.out - keyState.zoom.in) * KEY_ZOOM_SPEED * deltaTime);
+    }
+    if (keyFOV) {
+      camera.adjFOV((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * deltaTime);
+    }
+    if (keyFOVWithoutZoom) {
+      camera.adjFOVWithoutZoom((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * deltaTime);
+    }
+
 
     const canvasTexture = context.getCurrentTexture();
     renderPassDescriptor.colorAttachments[0].view = canvasTexture.createView();
@@ -626,25 +650,19 @@ async function main() {
     device.queue.submit([commandBuffer]);
 
     if (dt > 0) {
-      waveComputeTimingHelper.getResult().then(gpuTime => {
-        waveComputeTime += (gpuTime / 1e6 - waveComputeTime) / filterStrength;
-      });
-      boundaryComputeTimingHelper.getResult().then(gpuTime2 => {
-        boundaryComputeTime += (gpuTime2 / 1e6 - boundaryComputeTime) / filterStrength;
-      });
+      waveComputeTimingHelper.getResult().then(gpuTime => waveComputeTime += (gpuTime / 1e6 - waveComputeTime) / filterStrength);
+      boundaryComputeTimingHelper.getResult().then(gpuTime2 => boundaryComputeTime += (gpuTime2 / 1e6 - boundaryComputeTime) / filterStrength);
     } else {
       waveComputeTime = boundaryComputeTime = 0;
     }
-    renderTimingHelper.getResult().then(gpuTime => {
-      renderTime += (gpuTime / 1e6 - renderTime) / filterStrength;
-    });
+    renderTimingHelper.getResult().then(gpuTime => renderTime += (gpuTime / 1e6 - renderTime) / filterStrength);
 
     jsTime += (performance.now() - startTime - jsTime) / filterStrength;
 
     rafId = requestAnimationFrame(render);
   }
 
-  intId = setInterval(() => {
+  perfIntId = setInterval(() => {
     gui.io.fps(fps);
     gui.io.jsTime(jsTime);
     gui.io.frameTime(deltaTime);

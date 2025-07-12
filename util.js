@@ -59,8 +59,9 @@ let intensityFilterStrength = defaultIntensityFilterStrength;
 let amp = 1, wavelength = 6;
 
 // simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
-const simulationDomain = [384, 256, 256];
-let newDomainSize = [384, 256, 256];
+const simulationDomain = [768, 384, 384];
+let newDomainSize = vec3.clone(simulationDomain);
+let simVoxelCount = simulationDomain[0] * simulationDomain[1] * simulationDomain[2];
 
 let yMidpt = Math.floor(simulationDomain[1] / 2);
 let zMidpt = Math.floor(simulationDomain[2] / 2);
@@ -75,7 +76,8 @@ let waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] *
 function resizeDomain(newSize) {
   vec3.clone(newSize, simulationDomain);
   vec3.clone(simulationDomain.map(v => v / Math.max(...simulationDomain)), simulationDomainNorm);
-  waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
+  simVoxelCount = simulationDomain[0] * simulationDomain[1] * simulationDomain[2]
+  waveSpeedData = new Float32Array(simVoxelCount).fill(1);
   yMidpt = Math.floor(simulationDomain[1] / 2);
   zMidpt = Math.floor(simulationDomain[2] / 2);
   camera.target = vec3.scale(simulationDomainNorm, 0.5);
@@ -128,9 +130,9 @@ gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, 0.5, 2, "simCtrl", (newDt) => 
   if (oldDt) oldDt = newDt;
   else dt = newDt;
 });
-gui.addNumericInput("xSize", false, "X size (restart)", 8, 512, 8, 384, 0, "simCtrl", (value) => newDomainSize[0] = value);
-gui.addNumericInput("ySize", false, "Y size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[1] = value);
-gui.addNumericInput("zSize", false, "Z size (restart)", 8, 512, 8, 256, 0, "simCtrl", (value) => newDomainSize[2] = value);
+gui.addNumericInput("xSize", false, "X size (restart)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value);
+gui.addNumericInput("ySize", false, "Y size (restart)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value);
+gui.addNumericInput("zSize", false, "Z size (restart)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value);
 gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.waveSettingsValue.set([amp, wavelength]); });
 gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = value; uni.waveSettingsValue.set([amp, wavelength]); });
 gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
@@ -146,7 +148,7 @@ gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
 // stops interpolating after restarting?
 gui.addButton("restartSim", "Restart", false, "simCtrl", () => {
   cancelAnimationFrame(rafId);
-  clearInterval(intId);
+  clearInterval(perfIntId);
   resizeDomain(newDomainSize);
   refreshPreset();
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
@@ -199,7 +201,7 @@ gui.addGroup("camKeybinds", "Camera controls",
   `<div>
     Orbit: leftclick / arrows
     <br>
-    Pan: rightclick / wasd
+    Pan: rightclick / wasdgv
     <br>
     Zoom: scroll / fc
     <br>
@@ -215,7 +217,7 @@ gui.addGroup("camKeybinds", "Camera controls",
 
 
 // requestAnimationFrame id, fps update id
-let rafId, intId;
+let rafId, perfIntId;
 
 
 // timing
