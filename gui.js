@@ -202,7 +202,7 @@ class GUI {
 
     input.addEventListener("input", () => {
       if (valueSpan) valueSpan.innerText = floatPrecision == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(floatPrecision);
-      if (oninput) oninput(input.value);
+      if (oninput) oninput((floatPrecision == 0 ? parseInt : parseFloat)(input.value));
     });
   }
 
@@ -246,7 +246,7 @@ class GUI {
    * @param {Object} visibilityMap Object of format `"option": ["id1", "id2"]` of input ids to display when the option is selected
    * @param {Function} onChange Callback function of the currently selected value to run on user input
    */
-  addDropdown(id, label, options = [], group = "parent", visibilityMap = {}, onChange = null) {
+  addDropdown(id, label, options = [], group = "parent", visibilityMap = {}, onChange) {
     const container = document.createElement("div");
     container.id = `${id}-container`;
 
