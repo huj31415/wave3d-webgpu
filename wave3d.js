@@ -704,4 +704,4 @@ async function main() {
 
 const camera = new Camera(defaults);
 
-main().then(() => flatPreset(flatPresets.ZonePlate, presetXOffset, presetThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
+main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, presetThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
