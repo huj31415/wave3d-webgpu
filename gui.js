@@ -1,8 +1,3 @@
-HTMLElement.prototype._appendChild = HTMLElement.prototype.appendChild;
-HTMLElement.prototype.appendChild = function (e) {
-  this.append(" ");
-  return this._appendChild(e);
-}
 
 class GUI {
   io = {};
@@ -60,12 +55,16 @@ class GUI {
     const header = document.createElement("b");
     header.innerText = title;
 
-    group.appendChild(header);
-    group.appendChild(document.createElement("br"));
     group.innerHTML += html;
+    this.parent.appendChild(header);
     this.parent.appendChild(group);
     this.parent.appendChild(document.createElement("hr"));
     this.groups[id] = group;
+
+    header.addEventListener("click", () => {
+      group.classList.toggle("hidden");
+    });
+
     return group;
   }
 
