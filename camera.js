@@ -8,7 +8,7 @@ const KEY_PAN_SPEED = 5 / 15;
 const KEY_ZOOM_SPEED = 0.01 / 15;
 const KEY_FOV_SPEED = 0.005 / 15;
 
-const minFOV = (10).toRad(), maxFOV = (120).toRad();
+const minFOV = (1).toRad(), maxFOV = (120).toRad();
 
 const defaults = {
   target: vec3.scale(simulationDomainNorm, 0.5),
@@ -18,7 +18,7 @@ const defaults = {
   elevation: 0,
   fov: (60).toRad(),
   near: 0.1,
-  far: 100,
+  far: 1e3,
 }
 
 // camera state and interaction
@@ -53,7 +53,7 @@ class Camera {
 
   updateMatrix() {
     const aspect = canvas.clientWidth / canvas.clientHeight;
-    const proj = mat4.perspective(this.fov, aspect, this.near, this.far);
+    const proj = mat4.perspective(this.fov, aspect, this.near, this.far)
     const view = mat4.lookAt(this.position, this.target, this.worldUp);
     mat4.invert(mat4.multiply(proj, view), uni.matrixValue);
 
