@@ -89,6 +89,10 @@ class vec3 {
   static toString(a) {
     return Array.from(a).map((i) => parseFloat(i).toFixed(2));
   }
+
+  static equals(a, b) {
+    return a.every((e, i) => e === b[i]);
+  }
 }
 
 class mat4 {
