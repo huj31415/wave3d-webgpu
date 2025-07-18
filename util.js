@@ -2,9 +2,9 @@
 // 00-15: mat4x4f inv proj*view
 // 16-19: vec3f cameraPos, f32 dt
 // 20-23: vec3f volSize, f32 rayDelta
-// 24-27: vec3f volSizeNorm, f32 padding
-// 28-31: vec2f resolution, f32 amp, f32 wavelength
-// 32-35: f32 intensityFilter, f32 intensityMultiplier, vec2f padding
+// 24-27: vec3f volSizeNorm, f32 waveOn
+// 28-31: vec2f resolution, vec2f waveSettings (f32 amp, f32 wavelength)
+// 32-35: f32 intensityFilter, f32 intensityMultiplier, f32 waveSourceType, f32 waveform
 // total 36 * f32 = 144 bytes
 
 const uniformStruct = `
@@ -15,10 +15,13 @@ const uniformStruct = `
       volSize: vec3f,       // volume size in voxels
       rayDtMult: f32,       // raymarch sampling factor
       volSizeNorm: vec3f,   // normalized volume size (volSize / max(volSize))
+      waveOn: f32,          // whether the wave is on or not
       resolution: vec2f,    // canvas resolution: x-width, y-height
       waveSettings: vec2f,  // x: amplitude, y: wavelength
       intensityFilter: f32, // intensity filter strength, 0 = off
       intensityMult: f32,   // intensity rendering multiplier
+      waveSourceType: f32,  // source type: 0=plane, 1=point
+      waveform: f32,        // waveform: 0=sine, 1=square, 2=triangle, 3=sawtooth
     };
   `;
 
@@ -30,10 +33,13 @@ const kDtOffset = 19;
 const kVolSizeOffset = 20;
 const kRayDtMultOffset = 23;
 const kVolSizeNormOffset = 24;
+const kWaveOnOffset = 27;
 const kResOffset = 28;
 const kWaveSettingsOffset = 30;
 const kIntensityFilterOffset = 32;
 const kIntensityMultOffset = 33;
+const kWaveSourceTypeOffset = 34;
+const kWaveformOffset = 35;
 
 const uni = {};
 
@@ -43,23 +49,38 @@ uni.dtValue = uniformValues.subarray(kDtOffset, kDtOffset + 1);
 uni.volSizeValue = uniformValues.subarray(kVolSizeOffset, kVolSizeOffset + 3);
 uni.rayDtMultValue = uniformValues.subarray(kRayDtMultOffset, kRayDtMultOffset + 1);
 uni.volSizeNormValue = uniformValues.subarray(kVolSizeNormOffset, kVolSizeNormOffset + 3);
+uni.waveOnValue = uniformValues.subarray(kWaveOnOffset, kWaveOnOffset + 1);
 uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
-uni.waveSettingsValue = uniformValues.subarray(kWaveSettingsOffset, kWaveSettingsOffset + 2);
+uni.ampValue = uniformValues.subarray(kWaveSettingsOffset, kWaveSettingsOffset + 1);
+uni.wavelengthValue = uniformValues.subarray(kWaveSettingsOffset + 1, kWaveSettingsOffset + 2);
 uni.intensityFilterValue = uniformValues.subarray(kIntensityFilterOffset, kIntensityFilterOffset + 1);
 uni.intensityMultValue = uniformValues.subarray(kIntensityMultOffset, kIntensityMultOffset + 1);
+uni.waveSourceTypeValue = uniformValues.subarray(kWaveSourceTypeOffset, kWaveSourceTypeOffset + 1);
+uni.waveformValue = uniformValues.subarray(kWaveformOffset, kWaveformOffset + 1);
 
 Object.freeze(uni);
+
+const textures = {
+  stateTex0: null,
+  stateTex1: null,
+  intensityTex: null,
+  speedTex: null,
+};
 
 let dt = 0.5;
 let oldDt;
 
+let dtPerFrame = 1;
+
+let waveOn = true;
+
 let defaultIntensityFilterStrength = 50;
 let intensityFilterStrength = defaultIntensityFilterStrength;
 
-let amp = 1, wavelength = 6;
+let amp = 1, ampVal = amp, wavelength = 6;
 
 // simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
-const simulationDomain = [768, 384, 384];
+const simulationDomain = [384, 256, 256];//[768, 384, 384];
 let newDomainSize = vec3.clone(simulationDomain);
 let simVoxelCount = simulationDomain[0] * simulationDomain[1] * simulationDomain[2];
 
@@ -76,31 +97,71 @@ let waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] *
 function resizeDomain(newSize) {
   vec3.clone(newSize, simulationDomain);
   vec3.clone(simulationDomain.map(v => v / Math.max(...simulationDomain)), simulationDomainNorm);
-  simVoxelCount = simulationDomain[0] * simulationDomain[1] * simulationDomain[2]
+  simVoxelCount = simulationDomain[0] * simulationDomain[1] * simulationDomain[2];
   waveSpeedData = new Float32Array(simVoxelCount).fill(1);
   yMidpt = Math.floor(simulationDomain[1] / 2);
   zMidpt = Math.floor(simulationDomain[2] / 2);
-  camera.target = vec3.scale(simulationDomainNorm, 0.5);
+  camera.target = defaults.target = vec3.scale(simulationDomainNorm, 0.5);
 }
 
 /**
  * Refreshes the active preset
  */
-function refreshPreset() {
+function refreshPreset(clear = false) {
+  if (clear) waveSpeedData.fill(1);
   const presetType = gui.io.presetSelect.value;
   switch (presetType) {
     case "DoubleSlit":
     case "Aperture":
     case "ZonePlate":
-      symmetricFlatBarrier(flatPresets[presetType], presetXOffset, presetThickness, presetSettings[presetType]);
+      quadSymmetricFlatPreset(flatPresets[presetType], presetXOffset, presetThickness, presetSettings[presetType]);
       break;
     case "Lens":
-      createLens(lensPresets[gui.io.lensType()], presetXOffset, presetSettings.Lens);
+      createLens(lensPresets[gui.io.lensType()], false, presetXOffset, presetSettings.Lens);
+      break;
+    case "VortexPhasePlate":
+      phasePlate(flatPresets.VortexPhasePlate, presetXOffset, presetSettings.VortexPhasePlate);
       break;
   }
 }
 
-let timeBuffer;
+function softReset() {
+  const zeros = new Float32Array(simVoxelCount).fill(0);
+  device.queue.writeTexture(
+    { texture: textures.stateTex0 },
+    zeros,
+    { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
+    { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
+  );
+  device.queue.writeTexture(
+    { texture: textures.stateTex1 },
+    zeros,
+    { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
+    { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
+  );
+  device.queue.writeTexture(
+    { texture: textures.intensityTex },
+    zeros,
+    { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
+    { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
+  );
+}
+
+function hardReset() {
+  cancelAnimationFrame(rafId);
+  clearInterval(perfIntId);
+  if (!vec3.equals(simulationDomain, newDomainSize)) resizeDomain(newDomainSize);
+  textures.speedTex.destroy();
+  main().then(refreshPreset);
+}
+
+const waveformOptions = Object.freeze({
+  sine: 0,
+  square: 1,
+  triangle: 2,
+  sawtooth: 3
+});
+
 
 const canvas = document.getElementById("canvas");
 
@@ -126,66 +187,81 @@ gui.addNDimensionalOutput(["camAlt", "camAz"], "Alt/az", "°", ", ", 2, "camStat
 
 // Sim controls
 gui.addGroup("simCtrl", "Sim controls");
-gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, 0.5, 2, "simCtrl", (newDt) => {
+gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, dt, 2, "simCtrl", (newDt) => {
   if (oldDt) oldDt = newDt;
-  else dt = newDt;
+  else {
+    dt = newDt;
+    uni.dtValue.set([dt]);
+  }
 });
-gui.addNumericInput("xSize", false, "X size (restart)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value);
-gui.addNumericInput("ySize", false, "Y size (restart)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value);
-gui.addNumericInput("zSize", false, "Z size (restart)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value);
-gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.waveSettingsValue.set([amp, wavelength]); });
-gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = value; uni.waveSettingsValue.set([amp, wavelength]); });
+gui.addNumericInput("xSize", false, "X size (reinit)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value);
+gui.addNumericInput("ySize", false, "Y size (reinit)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value);
+gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value);
+gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.wavelengthValue.set([wavelength]); });
+gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = ampVal = value; uni.ampValue.set([amp]); });
+gui.addHalfWidthGroups("waveformOptions", "sourceTypeOptions", "simCtrl");
+gui.addRadioOptions("waveform", ["sine", "square", "triangle", "sawtooth"], "sine", "waveformOptions", (value) => uni.waveformValue.set([waveformOptions[value]]));
+gui.addRadioOptions("sourceType", ["plane", "point"], "plane", "sourceTypeOptions", (value) => uni.waveSourceTypeValue.set([value === "plane" ? 0 : 1]));
+gui.addButton("waveOn", "Toggle wave generator", true, "simCtrl", () => {
+  waveOn = !waveOn;
+  if (waveOn) {
+    uni.waveOnValue.set([1]);
+    amp = ampVal;
+    uni.ampValue.set([amp]);
+  }
+});
 gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
   if (oldDt) {
     dt = oldDt;
     oldDt = null;
+    uni.dtValue.set([dt]);
   } else {
     oldDt = dt;
     dt = 0;
   }
 });
 
-// stops interpolating after restarting?
-gui.addButton("restartSim", "Restart", false, "simCtrl", () => {
-  cancelAnimationFrame(rafId);
-  clearInterval(perfIntId);
-  resizeDomain(newDomainSize);
-  refreshPreset();
-  device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
-  main();
-});
+gui.addButton("softRestart", "Restart", false, "simCtrl", softReset);
+gui.addButton("hardRestart", "Reinitialize", true, "simCtrl", hardReset);
 
 // Preset controls
 gui.addGroup("presets", "Presets");
 
 gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets", (value) => presetSettings.Aperture.shape = presetSettings.ZonePlate.shape = shapes[value]);
-gui.addNumericInput("barrierThickness", true, "Thickness", 1, 16, 1, 2, 0, "presets", (value) => presetThickness = value)
 
 gui.addNumericInput("f", true, "Focal length", 4, 512, 1, 192, 0, "presets", (value) => presetSettings.ZonePlate.f = value);
-gui.addNumericInput("nCutouts", true, "# Cutouts", 1, 10, 1, 4, 0, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
+gui.addNumericInput("nCutouts", true, "# Cutouts", 1, 20, 1, 4, 0, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
 
 gui.addNumericInput("slitWidth", true, "Slit width", 3, 512, 1, 8, 0, "presets", (value) => presetSettings.DoubleSlit.slitWidth = value);
 gui.addNumericInput("slitSpacing", true, "Slit spacing", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
 gui.addNumericInput("slitHeight", true, "Slit height", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
 
-gui.addNumericInput("radius", true, "Radius", 0, 256, 1, 16, 0, "presets", (value) => presetSettings.Aperture.radius = presetSettings.Lens.radius = value);
+gui.addNumericInput("radius", true, "Radius", 0, 256, 1, 32, 0, "presets", (value) => presetSettings.Aperture.radius = presetSettings.Lens.radius = presetSettings.VortexPhasePlate.radius = value);
 
 gui.addCheckbox("invert", "Invert barrier", false, "presets", (checked) => presetSettings.Aperture.invert = checked);
 
 gui.addRadioOptions("lensType", ["elliptical", "parabolic"], "parabolic", "presets");
 gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) => presetSettings.Lens.thickness = value);
-gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, 1.2, 2, "presets", (value) => presetSettings.Lens.refractiveIndex = value);
+gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, 1.2, 2, "presets", (value) => presetSettings.Lens.refractiveIndex = presetSettings.VortexPhasePlate.refractiveIndex = value);
 gui.addNumericInput("halfLens", true, "Half lens", -1, 1, 1, 0, 0, "presets", (value) => presetSettings.Lens.half = value);
 gui.addCheckbox("outerBarrier", "Outer barrier", true, "presets", (checked) => presetSettings.Lens.outerBarrier = checked);
 
-gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens"], "presets", {
-  "ZonePlate": ["shape", "f", "nCutouts"],
-  "DoubleSlit": ["slitWidth", "slitSpacing", "slitHeight"],
-  "Aperture": ["shape", "radius", "invert"],
+gui.addNumericInput("n", true, "n", -4, 4, 1, 1, 0, "presets", (value) => presetSettings.VortexPhasePlate.n = value);
+
+gui.addNumericInput("barrierThickness", true, "Thickness", 1, 16, 1, 2, 0, "presets", (value) => presetThickness = value);
+gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 16, 0, "presets", (value) => presetXOffset = value);
+
+gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens", "VortexPhasePlate"], "presets", {
+  "ZonePlate": ["shape", "f", "nCutouts", "barrierThickness"],
+  "DoubleSlit": ["slitWidth", "slitSpacing", "slitHeight", "barrierThickness"],
+  "Aperture": ["shape", "radius", "invert", "barrierThickness"],
   "Lens": ["radius", "lensType", "lensThickness", "refractiveIndex", "halfLens", "outerBarrier"],
+  "VortexPhasePlate": ["radius", "refractiveIndex", "n"],
 });
-gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 64, 0, "presets", (value) => presetXOffset = value);
-gui.addButton("updatePreset", "Load preset", true, "presets", refreshPreset);
+
+gui.addButton("updatePreset", "Load preset", false, "presets", () => refreshPreset(false));
+gui.addButton("clearUpdatePreset", "Clear & load", false, "presets", () => refreshPreset(true));
+gui.addButton("clearPreset", "Clear", true, "presets", () => updateSpeedTexture(true));
 
 // Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");

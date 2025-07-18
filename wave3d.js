@@ -1,34 +1,37 @@
 let adapter, device;
 
+
 async function main() {
+
+  if (device) device.destroy();
 
   let maxComputeInvocationsPerWorkgroup, maxBufferSize, f32filterable;
 
   // WebGPU Setup
-  if (!device) {
-    adapter = await navigator.gpu?.requestAdapter();
+  // if (!device) {
+  adapter = await navigator.gpu?.requestAdapter();
 
-    maxComputeInvocationsPerWorkgroup = adapter.limits.maxComputeInvocationsPerWorkgroup;
-    maxBufferSize = adapter.limits.maxBufferSize;
-    f32filterable = adapter.features.has("float32-filterable");
+  maxComputeInvocationsPerWorkgroup = adapter.limits.maxComputeInvocationsPerWorkgroup;
+  maxBufferSize = adapter.limits.maxBufferSize;
+  f32filterable = adapter.features.has("float32-filterable");
 
-    device = await adapter?.requestDevice({
-      requiredFeatures: [
-        (adapter.features.has("timestamp-query") ? "timestamp-query" : ""),
-        (f32filterable ? "float32-filterable" : ""),
-      ],
-      requiredLimits: {
-        maxComputeInvocationsPerWorkgroup: maxComputeInvocationsPerWorkgroup,
-        maxBufferSize: maxBufferSize,
-      }
-    });
-    device.addEventListener('uncapturederror', event => {
-      const msg = event.error.message;
-      if (msg.includes("max buffer size limit"))
-        alert(`Max buffer size exceeded. Your device supports max size ${maxBufferSize}, specified size ${simVoxelCount() * 4}`);
-      else alert(msg);
-    });
-  }
+  device = await adapter?.requestDevice({
+    requiredFeatures: [
+      (adapter.features.has("timestamp-query") ? "timestamp-query" : ""),
+      (f32filterable ? "float32-filterable" : ""),
+    ],
+    requiredLimits: {
+      maxComputeInvocationsPerWorkgroup: maxComputeInvocationsPerWorkgroup,
+      maxBufferSize: maxBufferSize,
+    }
+  });
+  device.addEventListener('uncapturederror', event => {
+    const msg = event.error.message;
+    if (msg.includes("max buffer size limit"))
+      alert(`Max buffer size exceeded. Your device supports max size ${maxBufferSize}, specified size ${simVoxelCount() * 4}`);
+    // else alert(msg);
+  });
+  // }
   if (!device) {
     alert("Browser does not support WebGPU");
     document.body.textContent = "WebGPU is not supported in this browser.";
@@ -47,28 +50,28 @@ async function main() {
   // 3: texture_storage_3d r32float<r> speed
   // render 1 (new future), then switch 1 and 2 so that old present becomes past and old future becomes present
 
-  const stateTex0 = device.createTexture({
+  textures.stateTex0 = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "state texture 0",
   });
-  const stateTex1 = device.createTexture({
+  textures.stateTex1 = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "state texture 1",
   });
-  const intensityTex = device.createTexture({
+  textures.intensityTex = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
     label: "intensity texture",
   });
-  speedTex = device.createTexture({
+  textures.speedTex = device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
@@ -84,7 +87,7 @@ async function main() {
 
 
   // time for wave generator
-  timeBuffer = device.createBuffer({
+  const timeBuffer = device.createBuffer({
     size: Float32Array.BYTES_PER_ELEMENT,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     label: "timeBuffer"
@@ -180,23 +183,39 @@ async function main() {
         }
 
         // wave generator
-        if (true) {
+        if (uni.waveOn > 0) {
           // Wave generators
-          let waveGen = uni.waveSettings.x * sin(time * 6.28f / uni.waveSettings.y);
-
-          // plane wave
-          if (gid.x == 2) {
-            // write to the past/future texture
-            textureStore(past_future, gid, vec4f(waveGen, 0.0, 0.0, 0.0));
-            return;
+          let wavelengthAdjustedTime = time / uni.waveSettings.y;
+          var wave = uni.waveSettings.x;
+          switch (u32(uni.waveform)) {
+            case 0: { // sine
+              wave *= sin(6.28f * wavelengthAdjustedTime);
+            }
+            case 1: { // square
+              wave *= 4 * floor(wavelengthAdjustedTime) - 2 * floor(2 * wavelengthAdjustedTime) + 1;
+            }
+            case 2: { // triangle
+              wave *= 4 * abs(wavelengthAdjustedTime - floor(wavelengthAdjustedTime + 0.75) + 0.25) - 1;
+            }
+            case 3: { // sawtooth
+              wave *= 2 * (wavelengthAdjustedTime - floor(wavelengthAdjustedTime + 0.5));
+            }
+            default: {
+              wave *= 0;
+            }
           }
 
-          // point source
-          // if (all(gid == vec3u(2, volSize.y / 2, volSize.z / 2))) {
-          //   // write to the past/future texture
-          //   textureStore(past_future, gid, vec4f(200 * waveGen, 0.0, 0.0, 0.0));
-          //   return;
-          // }
+          let isPlane = uni.waveSourceType == 0;
+
+          // write wave source to texture
+          if (isPlane && gid.x == 2) {
+            // write to the past/future texture
+            textureStore(past_future, gid, vec4f(wave, 0.0, 0.0, 0.0));
+            return;
+          } else if (!isPlane && all(gid == vec3u(8, volSize.y / 2, volSize.z / 2))) {
+            textureStore(past_future, gid, vec4f(200.0 * wave, 0.0, 0.0, 0.0));
+            return;
+          }
         }
 
         // read the states
@@ -229,23 +248,11 @@ async function main() {
         // write to the past/future texture
         textureStore(past_future, gid, vec4f(newValue, 0.0, 0.0, 0.0));
 
-        // write to intensity texture
+        // write to intensity texture (adds several ms to compute time)
         if (uni.intensityFilter > 0) {
           let current = textureLoad(intensity, gid);
           textureStore(intensity, gid, current + (newValue * newValue - current) / (uni.intensityFilter + uni.waveSettings.y));
         }
-        
-        // if (uniforms.waveOn == 1) {
-        //   let waveGen = uniforms.amp * sin(time * 6.28f / uniforms.wavelength);
-        //   if (uniforms.waveType == 0 && x == 1) {
-        //     // plane wave
-        //     stateNext[index] = waveGen;
-        //   } else if (uniforms.waveType == 1 && x == 50 && y == height / 2) {
-        //     // point source
-        //     stateNext[index] = 10 * waveGen;
-        //   }
-        // }
-        
       }
     `,
     label: "wave compute module"
@@ -263,9 +270,9 @@ async function main() {
       { binding: 0, resource: { buffer: uniformBuffer } },
       { binding: 1, resource: tex0.createView() },
       { binding: 2, resource: tex1.createView() },
-      { binding: 3, resource: speedTex.createView() },
+      { binding: 3, resource: textures.speedTex.createView() },
       { binding: 4, resource: { buffer: timeBuffer } },
-      { binding: 5, resource: intensityTex.createView() },
+      { binding: 5, resource: textures.intensityTex.createView() },
     ],
     label: "wave compute bind group"
   });
@@ -313,22 +320,13 @@ async function main() {
         let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
         if (cdt <= 0) { return; }
 
-        let adjIndex = array<vec3i, 6>(
-          gid_i + directions[0], // left
-          gid_i + directions[1], // right
-          gid_i + directions[2], // down
-          gid_i + directions[3], // up
-          gid_i + directions[4], // back
-          gid_i + directions[5]  // front
-        );
-
         let adjSpeeds = array<f32, 6>(
-          textureLoad(waveSpeed, adjIndex[0]).r, // left
-          textureLoad(waveSpeed, adjIndex[1]).r, // right
-          textureLoad(waveSpeed, adjIndex[2]).r, // down
-          textureLoad(waveSpeed, adjIndex[3]).r, // up
-          textureLoad(waveSpeed, adjIndex[4]).r, // back
-          textureLoad(waveSpeed, adjIndex[5]).r  // front
+          textureLoad(waveSpeed, gid_i + directions[0]).r, // left
+          textureLoad(waveSpeed, gid_i + directions[1]).r, // right
+          textureLoad(waveSpeed, gid_i + directions[2]).r, // down
+          textureLoad(waveSpeed, gid_i + directions[3]).r, // up
+          textureLoad(waveSpeed, gid_i + directions[4]).r, // back
+          textureLoad(waveSpeed, gid_i + directions[5]).r  // front
         );
         let frac = (cdt - 1) / (cdt + 1);
 
@@ -390,7 +388,7 @@ async function main() {
       { binding: 0, resource: { buffer: uniformBuffer } },
       { binding: 1, resource: tex0.createView() },
       { binding: 2, resource: tex1.createView() },
-      { binding: 3, resource: speedTex.createView() }
+      { binding: 3, resource: textures.speedTex.createView() }
     ],
     label: "boundary compute bind group"
   });
@@ -425,14 +423,14 @@ async function main() {
       // value to color: cyan -> blue -> transparent (0) -> red -> yellow
       fn transferFn(value: f32) -> vec4f {
         let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
-        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1,1,1,1));
+        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1));
       }
 
       // value to grayscale
       fn intensityTransferFn(value: f32) -> vec4f {
         let newValue = -exp(-value) + 1;
         let a = 1.0 - pow(1.0 - newValue * 0.05, uni.rayDtMult);
-        return clamp(0.5 * vec4f(newValue, newValue, newValue, a), vec4f(0), vec4f(1,1,1,1));
+        return clamp(0.5 * vec4f(newValue, newValue, newValue, a), vec4f(0), vec4f(1));
       }
 
       fn rayBoxIntersect(start: vec3f, dir: vec3f) -> vec2f {
@@ -500,11 +498,15 @@ async function main() {
           
           var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
 
-          var sampleColor = select(vec4f(0.05), vec4f(0.0), speed == 1);
+          var sampleColor = vec4f(select(min(abs(1 - speed), 0.05), 0.0, speed == 1));
+          // var sampleColor = select(vec4f(0.05), vec4f(0.0), speed == 1);
 
-          if (speed <= 0.0) { // opaque barrier
+
+          // opaque barrier
+          if (speed <= 0.0) {
             let newAlpha = (1.0 - color.a) * 0.2;
             color += vec4f(newAlpha * vec3f(0.1), newAlpha);
+            // exit due to opaque barrier
             break;
           }
           
@@ -516,7 +518,7 @@ async function main() {
 
           var newAlpha = (1.0 - color.a) * sampleColor.a;
 
-          // project on +x face
+          // fake projection screen on +x face
           color += vec4f(sampleColor.rgb, 1) * newAlpha
             * select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
 
@@ -558,7 +560,7 @@ async function main() {
     entries: [
       { binding: 0, resource: { buffer: uniformBuffer } },
       { binding: 1, resource: tex.createView() },
-      { binding: 2, resource: speedTex.createView() },
+      { binding: 2, resource: textures.speedTex.createView() },
       { binding: 3, resource: sampler },
     ],
   });
@@ -585,7 +587,7 @@ async function main() {
     Math.ceil(simulationDomain[2] / wg_z)
   ]
 
-  let [tex0, tex1] = [stateTex0, stateTex1];
+  let [tex0, tex1] = [textures.stateTex0, textures.stateTex1];
 
   function render() {
     const startTime = performance.now();
@@ -616,7 +618,6 @@ async function main() {
       camera.adjFOVWithoutZoom((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * deltaTime);
     }
 
-
     const canvasTexture = context.getCurrentTexture();
     renderPassDescriptor.colorAttachments[0].view = canvasTexture.createView();
 
@@ -625,6 +626,17 @@ async function main() {
     const encoder = device.createCommandEncoder();
 
     if (dt > 0) {
+      if (!waveOn && amp > 0) {
+        // ease wave off
+        amp -= 0.2 * amp;
+        if (amp <= 5e-2) {
+          amp = 0;
+          uni.waveOnValue.set([0]);
+          device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
+        }
+        uni.ampValue.set([amp]);
+      }
+
       const waveComputePass = waveComputeTimingHelper.beginComputePass(encoder);
       waveComputePass.setPipeline(waveComputePipeline);
       waveComputePass.setBindGroup(0, waveComputeBindGroup(tex0, tex1));
@@ -642,7 +654,7 @@ async function main() {
 
     const renderPass = renderTimingHelper.beginRenderPass(encoder, renderPassDescriptor);
     renderPass.setPipeline(renderPipeline);
-    renderPass.setBindGroup(0, renderBindGroup(intensityFilterStrength > 0 ? intensityTex : tex0));
+    renderPass.setBindGroup(0, renderBindGroup(intensityFilterStrength > 0 ? textures.intensityTex : tex0));
     renderPass.draw(3, 1, 0, 0);
     renderPass.end();
 
@@ -675,11 +687,15 @@ async function main() {
   uni.dtValue.set([dt]);
   uni.volSizeValue.set(simulationDomain);
   uni.volSizeNormValue.set(simulationDomainNorm);
+  uni.waveOnValue.set([1]);
   uni.rayDtMultValue.set([2]);
   uni.resValue.set([canvas.width, canvas.height]);
-  uni.waveSettingsValue.set([amp, wavelength]);
+  uni.ampValue.set([amp]);
+  uni.wavelengthValue.set([wavelength]);
   uni.intensityFilterValue.set([intensityFilterStrength]);
   uni.intensityMultValue.set([1]);
+  uni.waveSourceTypeValue.set([0]);
+  uni.waveformValue.set([1]);
 
   device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
 
@@ -688,4 +704,4 @@ async function main() {
 
 const camera = new Camera(defaults);
 
-main().then(() => symmetricFlatBarrier(flatPresets.ZonePlate, 64, 2, { shape: shapes.circular, f: 192, nCutouts: 4 }));
+main().then(() => flatPreset(flatPresets.ZonePlate, presetXOffset, presetThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
