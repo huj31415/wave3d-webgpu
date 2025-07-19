@@ -129,7 +129,7 @@ function createLens(preset, convex = true, distance = 64, args = presetSettings.
       for (let x = 0; x < halfThickness; x++) {
         let offset = convex ? 0 : halfThickness + 2;
         let newSpeed = 1;
-        let aperture = flatPresets.Aperture(y, z, { shape: shapes.circular, radius: args.radius, invert: false });
+        let aperture = flatPresets.Aperture(y, z, { shape: shapes.circular, radius: args.radius, invert: false }) < 0;
         if (preset(x, y, z, args.radius, halfThickness, convex) && !aperture) {
           newSpeed = speed;
         } else if (args.outerBarrier && aperture && x < 2) {

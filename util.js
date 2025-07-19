@@ -117,7 +117,7 @@ function refreshPreset(clear = false) {
       quadSymmetricFlatPreset(flatPresets[presetType], presetXOffset, presetThickness, presetSettings[presetType]);
       break;
     case "Lens":
-      createLens(lensPresets[gui.io.lensType()], false, presetXOffset, presetSettings.Lens);
+      createLens(lensPresets[gui.io.lensType()], true, presetXOffset, presetSettings.Lens);
       break;
     case "VortexPhasePlate":
       phasePlate(flatPresets.VortexPhasePlate, presetXOffset, presetSettings.VortexPhasePlate);
