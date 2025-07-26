@@ -177,19 +177,13 @@ class GUI {
 
     const labelEl = document.createElement("label");
     labelEl.setAttribute("for", id);
+    labelEl.innerText = range ? `${label}: ` : label;
 
-    let valueSpan;
+    let valueSpan = document.createElement("span");
+    valueSpan.id = id + "Value";
+    valueSpan.innerText = floatPrecision == 0 ? parseInt(value) : parseFloat(value).toFixed(floatPrecision);
 
-    if (range) {
-      labelEl.innerText = `${label}: `;
-      valueSpan = document.createElement("span");
-      valueSpan.id = id + "Value";
-      valueSpan.innerText = floatPrecision == 0 ? parseInt(value) : parseFloat(value).toFixed(2);
-      labelEl.appendChild(valueSpan);
-    } else {
-      labelEl.innerText = label;
-    }
-
+    if (range) labelEl.appendChild(valueSpan);
 
     container.appendChild(input);
     container.appendChild(labelEl);
@@ -200,9 +194,17 @@ class GUI {
     // this.io[id + "Value"] = valueSpan;
 
     input.addEventListener("input", () => {
-      if (valueSpan) valueSpan.innerText = floatPrecision == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(floatPrecision);
+      if (range) valueSpan.innerText = floatPrecision == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(floatPrecision);
       if (oninput) oninput((floatPrecision == 0 ? parseInt : parseFloat)(input.value));
     });
+
+    labelEl.addEventListener("click", () => {
+      range = !range;
+      input.type = range ? "range" : "number";
+      labelEl.textContent = range ? `${label}: ` : label;
+      valueSpan.innerText = floatPrecision == 0 ? parseInt(value) : parseFloat(value).toFixed(floatPrecision);
+      if (range) labelEl.appendChild(valueSpan);
+    })
   }
 
   /**
