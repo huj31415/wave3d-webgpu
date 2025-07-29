@@ -76,11 +76,11 @@ const phasePlatePresets = Object.freeze({
     const n = Math.PI / args.n;
     return 1 / lerp(mod(Math.atan2(z, y), (2 * n)), 0, 2 * n, 1, args.refractiveIndex);
   },
-  PowerLens: (y, z, args = { radius: 64, refractiveIndex: 1.2, n: 2 }) => { // n is positive or 0
+  PowerLens: (y, z, args = presetSettings.PowerLens) => { // n is positive or 0
     const rNorm = Math.hypot(y, z) / (args.radius);
     return 1 / ((1 - rNorm ** args.n) * (args.refractiveIndex - 1) + 1);
   },
-  CircularLens: (y, z, args = { radius: 64, refractiveIndex: 1.2 }) => {
+  CircularLens: (y, z, args = presetSettings.CircularLens) => {
     const rNorm = Math.hypot(y, z) / (args.radius);
     const t = 1 + 1 / (2 * args.refractiveIndex * (args.refractiveIndex - 1));
     return t + 1 / args.refractiveIndex - Math.sqrt(t * t - rNorm * rNorm);
@@ -105,6 +105,12 @@ function quadSymmetricFlatPreset(preset, distance = 64, thickness = 2, args) {
   updateSpeedTexture();
 }
 
+/**
+ * Updates the wave speed field to a phase plate
+ * @param {Function} preset Function that returns the wave speed value at the given point
+ * @param {Number} distance X distance from x=0
+ * @param {Object} args Object containing arguments for the selected preset
+ */
 function phasePlate(preset, distance = 64, args) {
   const thickness = args.autoThickness ? wavelength / (args.refractiveIndex - 1) : gui.io.lensThickness.value; // effective path length difference of 1 wavelength
   for (let z = 0; z < simulationDomain[2]; z++) {
