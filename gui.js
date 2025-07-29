@@ -2,8 +2,6 @@
 class GUI {
   io = {};
   groups = {};
-  parent;
-  toggle;
 
   /**
    * Creates a GUI object
@@ -14,12 +12,11 @@ class GUI {
     const parentDiv = document.createElement("div");
     parentDiv.id = "controls"
     parentDiv.className = "right-dark";
-    this.parent = this.groups["parent"] = parentDiv;
+    this.groups["parent"] = parentDiv;
 
     const toggleBtn = document.createElement("button");
     toggleBtn.id = "toggleSettings";
     toggleBtn.innerText = ">";
-    this.toggle = toggleBtn;
 
     const titleElem = document.createElement("h2");
     titleElem.innerText = title;
@@ -45,6 +42,7 @@ class GUI {
    * @param {String} id id of the group, for adding other IO under it
    * @param {String} title Title of the group
    * @param {String} html Plain HTML to add to to the group
+   * @param {String} group ID of the group to add this under
    * @returns The newly created group
    */
   addGroup(id, title, html, group = "parent") {
@@ -63,7 +61,7 @@ class GUI {
 
     if (html) newGroup.innerHTML += html;
     this.groups[group].appendChild(newGroup);
-    if (title) this.parent.appendChild(document.createElement("hr"));
+    if (title) this.groups[group].appendChild(document.createElement("hr"));
     this.groups[id] = newGroup;
 
     return newGroup;
@@ -163,8 +161,9 @@ class GUI {
    * @param {Number} floatPrecision Precision of the output display
    * @param {String} group id of the group to add this under
    * @param {Function} oninput Callback function of the new value to run on user input
+   * @param {String} title Description as a tooltip
    */
-  addNumericInput(id, range = true, label, min, max, step, value = (min + max) / 2, floatPrecision = 2, group = "parent", oninput) {
+  addNumericInput(id, range = true, label, min, max, step, value = (min + max) / 2, floatPrecision = 2, group = "parent", oninput, title) {
     const container = document.createElement("div");
     container.id = `${id}-container`;
 
@@ -179,6 +178,7 @@ class GUI {
     const labelEl = document.createElement("label");
     labelEl.setAttribute("for", id);
     labelEl.innerText = range ? `${label}: ` : label;
+    if (title) labelEl.title = title;
 
     let valueSpan = document.createElement("span");
     valueSpan.id = id + "Value";
@@ -192,7 +192,6 @@ class GUI {
     this.groups[group].appendChild(container);
 
     this.io[id] = input;
-    // this.io[id + "Value"] = valueSpan;
 
     input.addEventListener("input", () => {
       if (range) valueSpan.innerText = floatPrecision == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(floatPrecision);
@@ -322,9 +321,9 @@ class GUI {
  * @param {String} defaultValue Value to be selected at initialization
  * @param {String} group id of the group to add this under
  * @param {Function} onChange Callback function of the selected value to run on user input
- * @param {Object} visibilityMap Optional map of radio value -> array of input IDs to show
+ * @param {Object} visibilityMap Object of format `"option": ["id1", "id2"]` of input ids to display when the option is selected
  */
-  addRadioOptions(name, options = [], defaultValue = null, group = "parent", visibilityMap = {}, onChange) {
+  addRadioOptions(name, options = [], defaultValue, group = "parent", visibilityMap = {}, onChange) {
     const container = document.createElement("div");
     container.id = `${name}-container`;
 

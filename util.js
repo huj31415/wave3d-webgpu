@@ -199,10 +199,10 @@ gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, dt, 2, "simCtrl", (newDt) => {
     dt = newDt;
     uni.dtValue.set([dt]);
   }
-});
-gui.addNumericInput("xSize", false, "X size (reinit)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value);
-gui.addNumericInput("ySize", false, "Y size (reinit)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value);
-gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value);
+}, "Simulation delta-time; must meet the CFL condition for stability");
+gui.addNumericInput("xSize", false, "X size (reinit)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value, "Requires reinitialization to apply");
+gui.addNumericInput("ySize", false, "Y size (reinit)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value, "Requires reinitialization to apply");
+gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value, "Requires reinitialization to apply");
 gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.wavelengthValue.set([wavelength]); });
 gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = ampVal = value; uni.ampValue.set([amp]); });
 gui.addHalfWidthGroups("waveformOptions", "sourceTypeOptions", "simCtrl");
@@ -249,13 +249,13 @@ gui.addNumericInput("radius", true, "Radius", 0, 256, 1, commonInitValues.radius
 gui.addCheckbox("invert", "Invert barrier", false, "presets", (checked) => presetSettings.Aperture.invert = checked);
 
 gui.addRadioOptions("lensType", ["elliptical", "parabolic"], "parabolic", "presets");
-gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) => 
+gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) =>
   presetSettings.Lens.thickness = presetSettings.CircularLens.thickness = presetSettings.PowerLens.thickness = value
 );
 gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, commonInitValues.refractiveIndex, 2, "presets", (value) =>
   presetSettings.Lens.refractiveIndex = presetSettings.Vortex.refractiveIndex = presetSettings.PowerLens.refractiveIndex = presetSettings.CircularLens.refractiveIndex = value
 );
-gui.addNumericInput("halfLens", true, "Half lens", -1, 1, 1, 0, 0, "presets", (value) => presetSettings.Lens.half = value);
+gui.addNumericInput("halfLens", true, "Half lens", -1, 1, 1, 0, 0, "presets", (value) => presetSettings.Lens.half = value, "-1: curved toward source, 0: both halves, 1: flat toward source");
 gui.addCheckbox("outerBarrier", "Outer barrier", true, "presets", (checked) => presetSettings.Lens.outerBarrier = checked);
 
 
@@ -285,16 +285,16 @@ gui.addButton("clearPreset", "Clear", true, "presets", () => updateSpeedTexture(
 
 // Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");
-gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]));
+gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
   intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
   uni.intensityFilterValue.set([intensityFilterStrength]);
 });
-gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]));
+gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]), "Raw intensity value multiplier before transfer function");
 
 // Camera keybinds
-gui.addGroup("camKeybinds", "Camera controls",
-  `<div>
+gui.addGroup("camKeybinds", "Camera controls", `
+  <div>
     Orbit: leftclick / arrows
     <br>
     Pan: rightclick / wasdgv
@@ -308,8 +308,18 @@ gui.addGroup("camKeybinds", "Camera controls",
     Reset view: middleclick / space
     <br>
     Reset FOV: ctrl+middleclick / ctrl+space
-  </div>`
-);
+  </div>
+`);
+
+// Extra info
+gui.addGroup("extraInfo", null, `
+  <div>
+    Click on section titles to expand/collapse
+    <br>
+    Hover on numeric input labels for more info if applicable, click to toggle between raw number and slider type input
+    <br>
+  </div>
+`);
 
 
 // requestAnimationFrame id, fps update id
