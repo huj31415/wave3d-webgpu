@@ -47,25 +47,26 @@ class GUI {
    * @param {String} html Plain HTML to add to to the group
    * @returns The newly created group
    */
-  addGroup(id, title, html = "") {
-    const group = document.createElement("div");
-    group.className = "control-group";
-    group.id = id;
+  addGroup(id, title, html, group = "parent") {
+    const newGroup = document.createElement("div");
+    newGroup.className = "control-group";
+    newGroup.id = id;
 
-    const header = document.createElement("b");
-    header.innerText = title;
+    if (title) {
+      const header = document.createElement("b");
+      header.innerText = title;
+      this.groups[group].appendChild(header);
+      header.addEventListener("click", () => {
+        newGroup.classList.toggle("hidden");
+      });
+    }
 
-    group.innerHTML += html;
-    this.parent.appendChild(header);
-    this.parent.appendChild(group);
-    this.parent.appendChild(document.createElement("hr"));
-    this.groups[id] = group;
+    if (html) newGroup.innerHTML += html;
+    this.groups[group].appendChild(newGroup);
+    if (title) this.parent.appendChild(document.createElement("hr"));
+    this.groups[id] = newGroup;
 
-    header.addEventListener("click", () => {
-      group.classList.toggle("hidden");
-    });
-
-    return group;
+    return newGroup;
   }
 
   /**
@@ -315,16 +316,34 @@ class GUI {
   }
 
   /**
-   * Adds a set of radio options
-   * @param {String} name name of the input
-   * @param {Array<String>} options Array of string options which are also the values
-   * @param {String} defaultValue Value to be selected at initialization
-   * @param {String} group id of the group to add this under
-   * @param {Function} onChange Callback function of the selected value to run on user input
-   */
-  addRadioOptions(name, options = [], defaultValue = null, group = "parent", onChange) {
+ * Adds a set of radio options with optional input visibility mapping
+ * @param {String} name name of the input
+ * @param {Array<String>} options Array of string options which are also the values
+ * @param {String} defaultValue Value to be selected at initialization
+ * @param {String} group id of the group to add this under
+ * @param {Function} onChange Callback function of the selected value to run on user input
+ * @param {Object} visibilityMap Optional map of radio value -> array of input IDs to show
+ */
+  addRadioOptions(name, options = [], defaultValue = null, group = "parent", visibilityMap = {}, onChange) {
     const container = document.createElement("div");
     container.id = `${name}-container`;
+
+    // Build reverse visibility map: inputId -> [allowedRadioValues]
+    const inputMap = {};
+    Object.entries(visibilityMap).forEach(([val, ids]) => {
+      ids.forEach(inputId => {
+        if (!inputMap[inputId]) inputMap[inputId] = [];
+        inputMap[inputId].push(val);
+      });
+    });
+
+    const updateVisibility = (selectedValue) => {
+      Object.entries(inputMap).forEach(([inputId, allowedVals]) => {
+        const el = document.getElementById(`${inputId}-container`);
+        if (el) el.style.display = allowedVals.includes(selectedValue) ? "" : "none";
+      });
+    };
+
 
     options.forEach((value) => {
       const input = document.createElement("input");
@@ -335,12 +354,12 @@ class GUI {
       if (value === defaultValue) input.checked = true;
 
       input.addEventListener("change", () => {
+        updateVisibility(value);
         if (onChange) onChange(value);
       });
 
       const labelEl = document.createElement("label");
       labelEl.setAttribute("for", input.id);
-      // labelEl.innerText = label;
       labelEl.innerText = value;
 
       container.appendChild(input);
@@ -348,11 +367,19 @@ class GUI {
       container.appendChild(document.createElement("br"));
     });
 
-    this.groups[group].appendChild(container);
+    if (Object.entries(visibilityMap).length > 0) {
+      const firstInput = document.getElementById(`${Object.entries(visibilityMap)[0][1][0]}-container`);
+      this.groups[group].insertBefore(container, firstInput);
+    } else {
+      this.groups[group].appendChild(container);
+    }
 
     this.io[name] = () => {
       const selected = container.querySelector(`input[name="${name}"]:checked`);
       return selected ? selected.value : null;
     };
+
+    // Initialize visibility state
+    updateVisibility(defaultValue);
   }
 }
