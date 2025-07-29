@@ -119,8 +119,9 @@ function refreshPreset(clear = false) {
     case "Lens":
       createLens(lensPresets[gui.io.lensType()], true, presetXOffset, presetSettings.Lens);
       break;
-    case "VortexPhasePlate":
-      phasePlate(flatPresets.VortexPhasePlate, presetXOffset, presetSettings.VortexPhasePlate);
+    case "PhasePlate":
+      const plateType = gui.io.phasePlateType();
+      phasePlate(phasePlatePresets[plateType], presetXOffset, presetSettings[plateType]);
       break;
   }
 }
@@ -164,6 +165,11 @@ const waveformOptions = Object.freeze({
 
 
 const canvas = document.getElementById("canvas");
+
+const commonInitValues = {
+  radius: 64,
+  refractiveIndex: 1.5,
+}
 
 const gui = new GUI("3D wave sim on WebGPU", canvas);
 
@@ -236,27 +242,41 @@ gui.addNumericInput("slitWidth", true, "Slit width", 3, 512, 1, 8, 0, "presets",
 gui.addNumericInput("slitSpacing", true, "Slit spacing", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
 gui.addNumericInput("slitHeight", true, "Slit height", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
 
-gui.addNumericInput("radius", true, "Radius", 0, 256, 1, 32, 0, "presets", (value) => presetSettings.Aperture.radius = presetSettings.Lens.radius = presetSettings.VortexPhasePlate.radius = value);
+gui.addNumericInput("radius", true, "Radius", 0, 256, 1, commonInitValues.radius, 0, "presets", (value) =>
+  presetSettings.Aperture.radius = presetSettings.Lens.radius = presetSettings.Vortex.radius = presetSettings.CircularLens.radius = presetSettings.PowerLens.radius = value
+);
 
 gui.addCheckbox("invert", "Invert barrier", false, "presets", (checked) => presetSettings.Aperture.invert = checked);
 
 gui.addRadioOptions("lensType", ["elliptical", "parabolic"], "parabolic", "presets");
-gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) => presetSettings.Lens.thickness = value);
-gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, 1.2, 2, "presets", (value) => presetSettings.Lens.refractiveIndex = presetSettings.VortexPhasePlate.refractiveIndex = value);
+gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) => 
+  presetSettings.Lens.thickness = presetSettings.CircularLens.thickness = presetSettings.PowerLens.thickness = value
+);
+gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, commonInitValues.refractiveIndex, 2, "presets", (value) =>
+  presetSettings.Lens.refractiveIndex = presetSettings.Vortex.refractiveIndex = presetSettings.PowerLens.refractiveIndex = presetSettings.CircularLens.refractiveIndex = value
+);
 gui.addNumericInput("halfLens", true, "Half lens", -1, 1, 1, 0, 0, "presets", (value) => presetSettings.Lens.half = value);
 gui.addCheckbox("outerBarrier", "Outer barrier", true, "presets", (checked) => presetSettings.Lens.outerBarrier = checked);
 
-gui.addNumericInput("n", true, "n", -4, 4, 1, 1, 0, "presets", (value) => presetSettings.VortexPhasePlate.n = value);
 
 gui.addNumericInput("barrierThickness", true, "Thickness", 1, 16, 1, 2, 0, "presets", (value) => presetThickness = value);
 gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 16, 0, "presets", (value) => presetXOffset = value);
 
-gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens", "VortexPhasePlate"], "presets", {
+gui.addGroup("phasePlateOptions-container", null, null, "presets");
+gui.addNumericInput("nVortices", true, "n vortices", -4, 4, 1, 1, 0, "phasePlateOptions-container", (value) => presetSettings.Vortex.n = value);
+gui.addNumericInput("exp", true, "exp", 0, 5, 0.1, 2, 1, "phasePlateOptions-container", (value) => presetSettings.PowerLens.n = value);
+gui.addRadioOptions("phasePlateType", ["Vortex", "PowerLens", "CircularLens"], "Vortex", "phasePlateOptions-container", {
+  "Vortex": ["nVortices"],
+  "PowerLens": ["exp"],
+  "CircularLens": [],
+});
+
+gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens", "PhasePlate"], "presets", {
   "ZonePlate": ["shape", "f", "nCutouts", "barrierThickness"],
   "DoubleSlit": ["slitWidth", "slitSpacing", "slitHeight", "barrierThickness"],
   "Aperture": ["shape", "radius", "invert", "barrierThickness"],
   "Lens": ["radius", "lensType", "lensThickness", "refractiveIndex", "halfLens", "outerBarrier"],
-  "VortexPhasePlate": ["radius", "refractiveIndex", "n"],
+  "PhasePlate": ["radius", "refractiveIndex", "lensThickness", "phasePlateOptions"],
 });
 
 gui.addButton("updatePreset", "Load preset", false, "presets", () => refreshPreset(false));
@@ -300,6 +320,7 @@ let rafId, perfIntId;
 let jsTime = 0, lastFrameTime = performance.now(), deltaTime = 10, fps = 0,
   waveComputeTime = 0, boundaryComputeTime = 0, renderTime = 0;
 
+// handle resizing
 window.onresize = window.onload = () => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;

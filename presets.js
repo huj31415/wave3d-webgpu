@@ -9,10 +9,12 @@ const shapes = Object.freeze({
 
 const presetSettings = {
   DoubleSlit: { slitWidth: 8, slitSpacing: 64, slitHeight: 64 },
-  Aperture: { shape: shapes.circular, radius: 32, invert: false },
+  Aperture: { shape: shapes.circular, radius: commonInitValues.radius, invert: false },
   ZonePlate: { shape: shapes.circular, f: 192, nCutouts: 4 },
-  Lens: { thickness: 16, radius: 64, refractiveIndex: 1.5, half: 0, outerBarrier: true },
-  VortexPhasePlate: { radius: 32, refractiveIndex: 1.2, n: 1 },
+  Lens: { thickness: 16, radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, half: 0, outerBarrier: true },
+  Vortex: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 1, autoThickness: true },
+  PowerLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 2, autoThickness: false },
+  CircularLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, autoThickness: false },
 }
 
 /**
@@ -54,9 +56,9 @@ const mod = (x, a) => x - a * Math.floor(x / a);
 const flatPresets = Object.freeze({
   DoubleSlit: (y, z, args = presetSettings.DoubleSlit) => (
     y > args.slitHeight / 2 // fill outside of slit area
-    || (y <= args.slitHeight / 2 // fill if inside slit height and outside slit opening
-      && (z < (args.slitSpacing - args.slitWidth) / 2 || z > (args.slitSpacing + args.slitWidth) / 2)
-    ) ? -1 : 1
+      || (y <= args.slitHeight / 2 // fill if inside slit height and outside slit opening
+        && (z < (args.slitSpacing - args.slitWidth) / 2 || z > (args.slitSpacing + args.slitWidth) / 2)
+      ) ? -1 : 1
   ),
   Aperture: (y, z, args = presetSettings.Aperture) => (args.shape(y, z) >= args.radius * args.radius) ? args.invert ? 1 : -1 : args.invert ? -1 : 1,
   ZonePlate: (y, z, args = presetSettings.ZonePlate) => {
@@ -67,14 +69,22 @@ const flatPresets = Object.freeze({
       if (a <= zone(n) && a >= zone(n - 1)) return -1;
     return a >= zone(maxN) ? -1 : 1;
   },
-  VortexPhasePlate: (x, y, z, thickness, args = presetSettings.VortexPhasePlate) => {
+});
+
+const phasePlatePresets = Object.freeze({
+  Vortex: (y, z, args = presetSettings.Vortex) => { // n is nonzero integer
     const n = Math.PI / args.n;
-    return shapes.circular(y, z) < args.radius * args.radius ? 1 / lerp(mod(Math.atan2(z, y), (2 * n)), 0, 2 * n, 1, args.refractiveIndex) : -1;
+    return 1 / lerp(mod(Math.atan2(z, y), (2 * n)), 0, 2 * n, 1, args.refractiveIndex);
   },
-  // VortexPhasePlate: (x, y, z, thickness, args = { radius: 32, n: 1, refractiveIndex: 1.5 }) => { // presetSettings.vortexPhasePlate
-  //   const n = Math.PI / args.n;
-  //   return shapes.circular(y, z) < args.radius * args.radius ? (x <= lerp(mod(Math.atan2(z, y), (2 * n)), 0, 2 * n, 0, thickness) ? (1 / args.refractiveIndex) : 1) : -1;
-  // }
+  PowerLens: (y, z, args = { radius: 64, refractiveIndex: 1.2, n: 2 }) => { // n is positive or 0
+    const rNorm = Math.hypot(y, z) / (args.radius);
+    return 1 / ((1 - rNorm ** args.n) * (args.refractiveIndex - 1) + 1);
+  },
+  CircularLens: (y, z, args = { radius: 64, refractiveIndex: 1.2 }) => {
+    const rNorm = Math.hypot(y, z) / (args.radius);
+    const t = 1 + 1 / (2 * args.refractiveIndex * (args.refractiveIndex - 1));
+    return t + 1 / args.refractiveIndex - Math.sqrt(t * t - rNorm * rNorm);
+  }
 });
 
 /**
@@ -96,12 +106,13 @@ function quadSymmetricFlatPreset(preset, distance = 64, thickness = 2, args) {
 }
 
 function phasePlate(preset, distance = 64, args) {
-  const thickness = wavelength / (args.refractiveIndex - 1); // effective path length difference of 1 wavelength
-  console.log(thickness)
+  const thickness = args.autoThickness ? wavelength / (args.refractiveIndex - 1) : gui.io.lensThickness.value; // effective path length difference of 1 wavelength
   for (let z = 0; z < simulationDomain[2]; z++) {
     for (let y = 0; y < simulationDomain[1]; y++) {
       for (let x = 0; x < thickness; x++) {
-        waveSpeedData[index3d(x + distance, y, z)] = preset(x, y - yMidpt, z - zMidpt, thickness, args);
+        waveSpeedData[index3d(x + distance, y, z)] = (shapes.circular(y - yMidpt, z - zMidpt) < args.radius * args.radius)
+          ? preset(y - yMidpt, z - zMidpt, args)
+          : -1;
       }
     }
   }
