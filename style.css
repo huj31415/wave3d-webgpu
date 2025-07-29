@@ -113,8 +113,12 @@ div.control-group {
     margin-top: 5px;
   }
 
-  &>div[id$="container"] {
+  &>div[id$="container"] :not(>input[type=radio]) {
     height: 25px;
+  }
+
+  &>div.control-group {
+    margin-top: 0px;
   }
 }
 
