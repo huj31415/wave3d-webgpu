@@ -108,12 +108,13 @@ h2 {
 
 div.control-group {
   padding: 2px;
+  user-select: none;
 
   &>* {
     margin-top: 5px;
   }
 
-  &>div[id$="container"] :not(>input[type=radio]) {
+  &>div[id$="container"]:not(.radioContainer) {
     height: 25px;
   }
 

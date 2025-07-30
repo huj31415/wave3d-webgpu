@@ -326,6 +326,7 @@ class GUI {
   addRadioOptions(name, options = [], defaultValue, group = "parent", visibilityMap = {}, onChange) {
     const container = document.createElement("div");
     container.id = `${name}-container`;
+    container.classList.add("radioContainer")
 
     // Build reverse visibility map: inputId -> [allowedRadioValues]
     const inputMap = {};
