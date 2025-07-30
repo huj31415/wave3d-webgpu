@@ -114,7 +114,7 @@ div.control-group {
     margin-top: 5px;
   }
 
-  &>div[id$="container"]:not(.radioContainer) {
+  &>div[id$="container"]:not(.radioContainer, .control-group) {
     height: 25px;
   }
 
