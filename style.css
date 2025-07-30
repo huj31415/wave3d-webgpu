@@ -36,8 +36,8 @@ input:not([type="radio"]) {
 
 label {
   margin-left: 7px;
-  /* position: absolute;
-  top: 0px; */
+  display: inline-block;
+  width: calc(100% - 150px);
 }
 
 button,
@@ -129,4 +129,6 @@ p {
 
 b {
   cursor: default;
+  display: block;
+  width: 100%;
 }
