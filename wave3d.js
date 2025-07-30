@@ -461,8 +461,7 @@ async function main() {
 
       // Beer-Lambert blending, add to accumulated color
       fn beerLambertBlend(sampleColor: vec4f, accumulatedColor: vec4f, stepLength: f32) -> vec4f {
-        let absorbance = sampleColor.a * stepLength;
-        let transmittance = exp(-absorbance);
+        let transmittance = exp(-sampleColor.a * stepLength); // transmittance = exp(-absorbance)
         let contribution = sampleColor.rgb * (1.0 - transmittance);
 
         return vec4f((1.0 - accumulatedColor.a) * contribution, (1.0 - accumulatedColor.a) * (1.0 - transmittance));
@@ -500,62 +499,36 @@ async function main() {
         var color = vec4f(0);
         let renderIntensity = uni.intensityFilter > 0;
 
-        var i: f32;
-        for (i = t0; i < intersection.y; i += rayDt) {
+        // var i: f32;
+        for (var i = t0; i < intersection.y; i += rayDt) {
+          let adjDt = min(rayDt, intersection.y - i);
+
           // sample at normalized current ray position
           let samplePos = rayPos / uni.volSizeNorm;
           // increment ray position
-          rayPos += rayDir * rayDt;
+          rayPos += rayDir * adjDt;
           
           var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
           
           // opaque barrier
           if (speed <= 0.0) {
-            return linear2srgb(color + beerLambertBlend(vec4f(1), color, rayDt));
+            return linear2srgb(color + beerLambertBlend(vec4f(1), color, adjDt));
           }
-            
+          
           var sampleColor = vec4f(select(min(abs(1 - speed), 0.05) * 10, 0.0, speed == 1));
-
+          
           let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
-
+          
           if (sampleValue == 0.0 && speed == 1) { continue; } // skip empty samples
-
+          
           sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
           if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= 2.0; }
           
-          color += beerLambertBlend(sampleColor, color, rayDt);
-
+          color += beerLambertBlend(sampleColor, color, adjDt);
+          
           // exit if almost opaque
           if (color.a >= 0.95) { return linear2srgb(color); }
         }
-        // return linear2srgb(color);
-
-        let partialDt = rayDt - i + intersection.y;
-        // return vec4f(vec3f(partialDt/rayDt), 1); // debug
-        
-        if (partialDt > 0) {
-          // sample at far edge
-          let samplePos = (rayOrigin + intersection.y * rayDir) / uni.volSizeNorm;
-          
-          var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
-
-          
-          // opaque barrier
-          if (speed <= 0.0) {
-            return linear2srgb(color + beerLambertBlend(vec4f(1), color, rayDt));
-          }
-          var sampleColor = vec4f(select(min(abs(1 - speed), 0.05), 0.0, speed == 1));
-          
-          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
-
-          if (sampleValue == 0.0 && speed == 1) { return linear2srgb(color); } // skip empty samples
-
-          sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
-          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= 2.0; }
-
-          color += beerLambertBlend(sampleColor, color, partialDt);
-        }
-
         return linear2srgb(color);
       }
     `,
