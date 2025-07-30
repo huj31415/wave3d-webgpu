@@ -51,10 +51,10 @@ select {
   &.fullwidth {
     width: 288px;
   }
+}
 
-  &:not(.fullwidth) {
-    margin-right: 7px;
-  }
+button:not(.fullwidth) {
+  margin-right: 7px;
 }
 
 button#toggleSettings {
