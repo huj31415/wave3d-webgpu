@@ -423,14 +423,7 @@ async function main() {
       // value to color: cyan -> blue -> transparent (0) -> red -> yellow
       fn transferFn(value: f32) -> vec4f {
         let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
-        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1));
-      }
-
-      // value to grayscale
-      fn intensityTransferFn(value: f32) -> vec4f {
-        let newValue = -exp(-value) + 1;
-        let a = 1.0 - pow(1.0 - newValue * 0.05, uni.rayDtMult);
-        return clamp(0.5 * vec4f(newValue, newValue, newValue, a), vec4f(0), vec4f(1));
+        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1)) * 10; // 10x for beer-lambert
       }
 
       fn rayBoxIntersect(start: vec3f, dir: vec3f) -> vec2f {
@@ -458,6 +451,21 @@ async function main() {
         let higher = 1.055 * pow(color.rgb, vec3f(1.0 / 2.4)) - 0.055;
         let lower = 12.92 * color.rgb;
         return vec4f(select(higher, lower, cutoff), color.a);
+      }
+
+      // Old alpha blending method, add to accumulated color
+      fn oldBlend(sampleColor: vec4f, accumulatedColor: vec4f) -> vec4f {
+        return vec4f(sampleColor.rgb, 1) * (1.0 - accumulatedColor.a) * sampleColor.a;
+        //  color *= select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
+      }
+
+      // Beer-Lambert blending, add to accumulated color
+      fn beerLambertBlend(sampleColor: vec4f, accumulatedColor: vec4f, stepLength: f32) -> vec4f {
+        let absorbance = sampleColor.a * stepLength;
+        let transmittance = exp(-absorbance);
+        let contribution = sampleColor.rgb * (1.0 - transmittance);
+
+        return vec4f((1.0 - accumulatedColor.a) * contribution, (1.0 - accumulatedColor.a) * (1.0 - transmittance));
       }
 
       @fragment
@@ -492,38 +500,60 @@ async function main() {
         var color = vec4f(0);
         let renderIntensity = uni.intensityFilter > 0;
 
-        for (var i = t0; i < intersection.y; i += rayDt) {
+        var i: f32;
+        for (i = t0; i < intersection.y; i += rayDt) {
+          // sample at normalized current ray position
           let samplePos = rayPos / uni.volSizeNorm;
+          // increment ray position
           rayPos += rayDir * rayDt;
           
           var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
-
-          var sampleColor = vec4f(select(min(abs(1 - speed), 0.05), 0.0, speed == 1));
-          // var sampleColor = select(vec4f(0.05), vec4f(0.0), speed == 1);
-
-
+          
           // opaque barrier
           if (speed <= 0.0) {
-            let newAlpha = (1.0 - color.a) * 0.2;
-            color += vec4f(newAlpha * vec3f(0.1), newAlpha);
-            // exit due to opaque barrier
-            break;
+            return linear2srgb(color + beerLambertBlend(vec4f(1), color, rayDt));
           }
-          
+            
+          var sampleColor = vec4f(select(min(abs(1 - speed), 0.05) * 10, 0.0, speed == 1));
+
           let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
 
           if (sampleValue == 0.0 && speed == 1) { continue; } // skip empty samples
 
           sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
-
-          var newAlpha = (1.0 - color.a) * sampleColor.a;
-
-          // fake projection screen on +x face
-          color += vec4f(sampleColor.rgb, 1) * newAlpha
-            * select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
+          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= 2.0; }
+          
+          color += beerLambertBlend(sampleColor, color, rayDt);
 
           // exit if almost opaque
-          if (color.a >= 0.95) { break; }
+          if (color.a >= 0.95) { return linear2srgb(color); }
+        }
+        // return linear2srgb(color);
+
+        let partialDt = rayDt - i + intersection.y;
+        // return vec4f(vec3f(partialDt/rayDt), 1); // debug
+        
+        if (partialDt > 0) {
+          // sample at far edge
+          let samplePos = (rayOrigin + intersection.y * rayDir) / uni.volSizeNorm;
+          
+          var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
+
+          
+          // opaque barrier
+          if (speed <= 0.0) {
+            return linear2srgb(color + beerLambertBlend(vec4f(1), color, rayDt));
+          }
+          var sampleColor = vec4f(select(min(abs(1 - speed), 0.05), 0.0, speed == 1));
+          
+          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
+
+          if (sampleValue == 0.0 && speed == 1) { return linear2srgb(color); } // skip empty samples
+
+          sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
+          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= 2.0; }
+
+          color += beerLambertBlend(sampleColor, color, partialDt);
         }
 
         return linear2srgb(color);
