@@ -42,6 +42,8 @@ function updateQuadSymmetry(x, yRel, zRel, newSpeed) {
  * @param {Boolean} reset Whether to reset the wave speed field to 1 
  */
 function updateSpeedTexture(reset = false) {
+  cleared = reset;
+  console.log(cleared);
   device.queue.writeTexture(
     { texture: textures.speedTex },
     reset ? waveSpeedData.fill(1) : waveSpeedData,

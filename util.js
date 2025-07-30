@@ -90,6 +90,8 @@ let zMidpt = Math.floor(simulationDomain[2] / 2);
 const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulationDomain));
 let waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
 
+let cleared = false;
+
 /**
  * Resizes the simulation domain
  * @param {Array<Number>} newSize New simulation domain size
@@ -153,7 +155,8 @@ function hardReset() {
   clearInterval(perfIntId);
   if (!vec3.equals(simulationDomain, newDomainSize)) resizeDomain(newDomainSize);
   textures.speedTex.destroy();
-  main().then(refreshPreset);
+  if (cleared) main();
+  else main().then(refreshPreset);
 }
 
 const waveformOptions = Object.freeze({
@@ -206,8 +209,8 @@ gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDoma
 gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.wavelengthValue.set([wavelength]); });
 gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = ampVal = value; uni.ampValue.set([amp]); });
 gui.addHalfWidthGroups("waveformOptions", "sourceTypeOptions", "simCtrl");
-gui.addRadioOptions("waveform", ["sine", "square", "triangle", "sawtooth"], "sine", "waveformOptions", (value) => uni.waveformValue.set([waveformOptions[value]]));
-gui.addRadioOptions("sourceType", ["plane", "point"], "plane", "sourceTypeOptions", (value) => uni.waveSourceTypeValue.set([value === "plane" ? 0 : 1]));
+gui.addRadioOptions("waveform", ["sine", "square", "triangle", "sawtooth"], "sine", "waveformOptions", {}, (value) => uni.waveformValue.set([waveformOptions[value]]));
+gui.addRadioOptions("sourceType", ["plane", "point"], "plane", "sourceTypeOptions", {}, (value) => uni.waveSourceTypeValue.set([value === "plane" ? 0 : 1]));
 gui.addButton("waveOn", "Toggle wave generator", true, "simCtrl", () => {
   waveOn = !waveOn;
   if (waveOn) {
@@ -233,7 +236,7 @@ gui.addButton("hardRestart", "Reinitialize", true, "simCtrl", hardReset);
 // Preset controls
 gui.addGroup("presets", "Presets");
 
-gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets", (value) => presetSettings.Aperture.shape = presetSettings.ZonePlate.shape = shapes[value]);
+gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets", {}, (value) => presetSettings.Aperture.shape = presetSettings.ZonePlate.shape = shapes[value]);
 
 gui.addNumericInput("f", true, "Focal length", 4, 512, 1, 192, 0, "presets", (value) => presetSettings.ZonePlate.f = value);
 gui.addNumericInput("nCutouts", true, "# Cutouts", 1, 20, 1, 4, 0, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
