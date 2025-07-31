@@ -74,7 +74,7 @@ let dtPerFrame = 1;
 
 let waveOn = true;
 
-let defaultIntensityFilterStrength = 50;
+let defaultIntensityFilterStrength = 100;
 let intensityFilterStrength = defaultIntensityFilterStrength;
 
 let amp = 1, ampVal = amp, wavelength = 6;
@@ -294,6 +294,12 @@ gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) =
   uni.intensityFilterValue.set([intensityFilterStrength]);
 });
 gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]), "Raw intensity value multiplier before transfer function");
+gui.addNumericInput("intensityFilter", true, "Intensity filter", 0, 3, 0.1, 1, 1, "visCtrl", (value) => {
+  value = Math.pow(10, value);
+  defaultIntensityFilterStrength = value;
+  intensityFilterStrength = gui.io.intensity.checked ? defaultIntensityFilterStrength : 0;
+  uni.intensityFilterStrength.set([value]);
+}, "Intensity low pass filter strength");
 
 // Camera keybinds
 gui.addGroup("camKeybinds", "Camera controls", `
