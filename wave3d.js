@@ -179,6 +179,7 @@ async function main() {
         let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
         if (cdt <= 0) {
           textureStore(past_future, gid, vec4f(0));
+          textureStore(intensity, gid, vec4f(0));
           return;
         }
 
@@ -459,14 +460,6 @@ async function main() {
         //  color *= select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
       }
 
-      // Beer-Lambert blending, add to accumulated color
-      fn beerLambertBlend(sampleColor: vec4f, accumulatedColor: vec4f, stepLength: f32) -> vec4f {
-        let transmittance = exp(-sampleColor.a * stepLength); // transmittance = exp(-absorbance)
-        let contribution = sampleColor.rgb * (1.0 - transmittance);
-
-        return vec4f((1.0 - accumulatedColor.a) * contribution, (1.0 - accumulatedColor.a) * (1.0 - transmittance));
-      }
-
       @fragment
       fn fs(@location(0) fragCoord: vec2f) -> @location(0) vec4f {
         // Convert fragment coordinates to normalized device coordinates
@@ -499,7 +492,6 @@ async function main() {
         var color = vec4f(0);
         let renderIntensity = uni.intensityFilter > 0;
 
-        // var i: f32;
         for (var i = t0; i < intersection.y; i += rayDt) {
           let adjDt = min(rayDt, intersection.y - i);
 
@@ -507,14 +499,15 @@ async function main() {
           let samplePos = rayPos / uni.volSizeNorm;
           // increment ray position
           rayPos += rayDir * adjDt;
-          
+
           var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
-          
+
           // opaque barrier
           if (speed <= 0.0) {
-            return linear2srgb(color + beerLambertBlend(vec4f(1), color, adjDt));
+            color += vec4f((1.0 - color.a) * (1.0 - exp(-adjDt)));
+            break;
           }
-          
+
           var sampleColor = vec4f(select(min(abs(1 - speed), 0.05) * 10, 0.0, speed == 1));
           
           let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
@@ -523,11 +516,11 @@ async function main() {
           
           sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
           if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= 2.0; }
-          
-          color += beerLambertBlend(sampleColor, color, adjDt);
-          
+
+          color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
+
           // exit if almost opaque
-          if (color.a >= 0.95) { return linear2srgb(color); }
+          if (color.a >= 0.95) { break; }
         }
         return linear2srgb(color);
       }
