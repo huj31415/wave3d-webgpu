@@ -43,7 +43,6 @@ function updateQuadSymmetry(x, yRel, zRel, newSpeed) {
  */
 function updateSpeedTexture(reset = false) {
   cleared = reset;
-  console.log(cleared);
   device.queue.writeTexture(
     { texture: textures.speedTex },
     reset ? waveSpeedData.fill(1) : waveSpeedData,
