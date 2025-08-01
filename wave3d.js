@@ -98,7 +98,7 @@ async function main() {
 
   const waveComputeModule = device.createShaderModule({
     code: `
-      ${uniformStruct}
+      ${wgslUniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var past_future:  texture_storage_3d<r32float, read_write>;
@@ -209,7 +209,7 @@ async function main() {
           let isPlane = uni.waveSourceType == 0;
 
           // write wave source to texture
-          if (isPlane && gid.x == 2) {
+          if (isPlane && gid.x == 0) {
             // write to the past/future texture
             textureStore(past_future, gid, vec4f(wave, 0.0, 0.0, 0.0));
             return;
@@ -280,7 +280,7 @@ async function main() {
 
   const boundaryComputeModule = device.createShaderModule({
     code: `
-      ${uniformStruct}
+      ${wgslUniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var future:       texture_storage_3d<r32float, read_write>;
@@ -336,7 +336,7 @@ async function main() {
 
         // apply boundary conditions
         // xn
-        if (gid.x == 0 || adjSpeeds[0] < 0) {
+        if ((uni.waveOn == 0 && gid.x == 0) || adjSpeeds[0] < 0) {
           boundaryValue += mur1stOrder(gid_i, 1, frac);
           boundaryCount += 1;
         }
@@ -396,7 +396,7 @@ async function main() {
 
   const renderModule = device.createShaderModule({
     code: `
-      ${uniformStruct}
+      ${wgslUniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var stateTexture: texture_3d<f32>;

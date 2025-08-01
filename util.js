@@ -7,7 +7,10 @@
 // 32-35: f32 intensityFilter, f32 intensityMultiplier, f32 waveSourceType, f32 waveform
 // total 36 * f32 = 144 bytes
 
-const uniformStruct = `
+// add alpha multiplier and +x projection alpha multiplier
+// 36-39: f32 global alpha multiplier, f32 +x projection alpha multiplier, vec2f padding
+
+const wgslUniformStruct = `
     struct Uniforms {
       invMatrix: mat4x4f,   // inverse proj*view matrix
       cameraPos: vec3f,     // camera position in world space
@@ -148,6 +151,7 @@ function softReset() {
     { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
     { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
   );
+  uni.dtValue.set([dt]);
 }
 
 function hardReset() {
@@ -157,6 +161,7 @@ function hardReset() {
   textures.speedTex.destroy();
   if (cleared) main();
   else main().then(refreshPreset);
+  uni.dtValue.set([dt]);
 }
 
 const waveformOptions = Object.freeze({
@@ -196,13 +201,10 @@ gui.addNDimensionalOutput(["camAlt", "camAz"], "Alt/az", "°", ", ", 2, "camStat
 
 // Sim controls
 gui.addGroup("simCtrl", "Sim controls");
-gui.addNumericInput("dt", true, "dt", 0, 1, 0.01, dt, 2, "simCtrl", (newDt) => {
+gui.addNumericInput("dt", true, "dt (reinit)", 0, 1, 0.01, dt, 2, "simCtrl", (newDt) => {
   if (oldDt) oldDt = newDt;
-  else {
-    dt = newDt;
-    uni.dtValue.set([dt]);
-  }
-}, "Simulation delta-time; must meet the CFL condition for stability");
+  else dt = newDt;
+}, "Simulation delta-time; must meet the CFL condition for stability; requires reinitialization to apply");
 gui.addNumericInput("xSize", false, "X size (reinit)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value, "Requires reinitialization to apply");
 gui.addNumericInput("ySize", false, "Y size (reinit)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value, "Requires reinitialization to apply");
 gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value, "Requires reinitialization to apply");
@@ -268,10 +270,12 @@ gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 16, 0, "presets", (v
 gui.addGroup("phasePlateOptions-container", null, null, "presets");
 gui.addNumericInput("nVortices", true, "n vortices", -4, 4, 1, 1, 0, "phasePlateOptions-container", (value) => presetSettings.Vortex.n = value);
 gui.addNumericInput("exp", true, "exp", 0, 5, 0.1, 2, 1, "phasePlateOptions-container", (value) => presetSettings.PowerLens.n = value);
+gui.addCheckbox("invertLens", "Invert lens", false, "phasePlateOptions-container", (checked) => presetSettings.PowerLens.invert = presetSettings.CircularLens.invert = checked);
+
 gui.addRadioOptions("phasePlateType", ["Vortex", "PowerLens", "CircularLens"], "Vortex", "phasePlateOptions-container", {
   "Vortex": ["nVortices"],
-  "PowerLens": ["exp"],
-  "CircularLens": [],
+  "PowerLens": ["exp", "invertLens"],
+  "CircularLens": ["invertLens"],
 });
 
 gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens", "PhasePlate"], "presets", {

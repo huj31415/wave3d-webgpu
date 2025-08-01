@@ -13,8 +13,8 @@ const presetSettings = {
   ZonePlate: { shape: shapes.circular, f: 192, nCutouts: 4 },
   Lens: { thickness: 16, radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, half: 0, outerBarrier: true },
   Vortex: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 1, autoThickness: true },
-  PowerLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 2, autoThickness: false },
-  CircularLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, autoThickness: false },
+  PowerLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 2, autoThickness: false, invert: false },
+  CircularLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, autoThickness: false, invert: false },
 }
 
 /**
@@ -79,12 +79,16 @@ const phasePlatePresets = Object.freeze({
   },
   PowerLens: (y, z, args = presetSettings.PowerLens) => { // n is positive or 0
     const rNorm = Math.hypot(y, z) / (args.radius);
-    return 1 / ((1 - rNorm ** args.n) * (args.refractiveIndex - 1) + 1);
+    // return rNorm ** args.n * (1 - 1 / args.refractiveIndex) + 1 / args.refractiveIndex;
+    const a = 1 / ((1 - rNorm ** args.n) * (args.refractiveIndex - 1) + 1);
+    return args.invert ? 1 + (1 / args.refractiveIndex) - a : a;
   },
   CircularLens: (y, z, args = presetSettings.CircularLens) => {
     const rNorm = Math.hypot(y, z) / (args.radius);
     const t = 1 + 1 / (2 * args.refractiveIndex * (args.refractiveIndex - 1));
-    return t + 1 / args.refractiveIndex - Math.sqrt(t * t - rNorm * rNorm);
+    const a = t - Math.sqrt(t * t - rNorm * rNorm);
+    return args.invert ? 1 - a : (1 / args.refractiveIndex + a);
+    // return 1 / (Math.sqrt(1 - rNorm*rNorm) * (args.refractiveIndex - 1) + 1);
   }
 });
 
