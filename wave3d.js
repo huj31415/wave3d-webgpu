@@ -489,29 +489,24 @@ async function main() {
           // increment ray position
           rayPos += rayDir * adjDt;
 
-          var speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
+          let speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
 
           // opaque barrier
           if (speed <= 0.0) {
             color += vec4f((1.0 - color.a) * (1.0 - exp(-adjDt)));
             break;
           }
+          
+          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
+          
+          if (sampleValue == 0 && speed == 1) { continue; } // skip empty samples
 
-          var sampleColor = vec4f(select(min(abs(1 - speed), 0.05) * 10, 0.0, speed == 1));
+          let sampleColor = vec4f(min(abs(1 - speed), 0.05) * 10) + transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
           
-          var sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
-          
-          if (sampleValue == 0.0 && speed == 1) { continue; } // skip empty samples
-          
-          if (renderIntensity) {
-            sampleValue *= uni.intensityMult;
-          }
-          
-          sampleColor += transferFn(sampleValue);
-          
-          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= uni.plusXAlpha; }
+          let alphaMult = select(1.0, uni.plusXAlpha, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
+          // if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= uni.plusXAlpha; }
 
-          color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
+          color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt * alphaMult)) * vec4f(sampleColor.rgb, 1);
 
           // exit if almost opaque
           if (color.a >= 0.95) { break; }
@@ -565,7 +560,7 @@ async function main() {
       },
     ]
   };
-  const filterStrength = 10;
+  const filterStrength = 50;
 
   const waveComputeTimingHelper = new TimingHelper(device);
   const boundaryComputeTimingHelper = new TimingHelper(device);
@@ -688,7 +683,7 @@ async function main() {
   uni.intensityMultValue.set([1]);
   uni.waveSourceTypeValue.set([0]);
   uni.waveformValue.set([0]);
-  uni.globalAlphaValue.set([1]);
+  uni.globalAlphaValue.set([2]);
   uni.plusXAlphaValue.set([2]);
   time = 0;
   uni.wavelengthTimeValue.set([0]);
