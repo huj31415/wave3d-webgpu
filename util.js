@@ -3,12 +3,12 @@
 // 16-19: vec3f cameraPos, f32 dt
 // 20-23: vec3f volSize, f32 rayDelta
 // 24-27: vec3f volSizeNorm, f32 waveOn
-// 28-31: vec2f resolution, vec2f waveSettings (f32 amp, f32 wavelength)
+// 28-31: vec2f resolution, f32 amplitude, f32 time
 // 32-35: f32 intensityFilter, f32 intensityMultiplier, f32 waveSourceType, f32 waveform
+// 36-39: f32 global alpha multiplier, f32 +x projection alpha multiplier, vec2f padding
 // total 36 * f32 = 144 bytes
 
 // add alpha multiplier and +x projection alpha multiplier
-// 36-39: f32 global alpha multiplier, f32 +x projection alpha multiplier, vec2f padding
 
 const wgslUniformStruct = `
     struct Uniforms {
@@ -20,15 +20,19 @@ const wgslUniformStruct = `
       volSizeNorm: vec3f,   // normalized volume size (volSize / max(volSize))
       waveOn: f32,          // whether the wave is on or not
       resolution: vec2f,    // canvas resolution: x-width, y-height
-      waveSettings: vec2f,  // x: amplitude, y: wavelength
+      amplitude: f32,       // wave amplitude
+      wavelengthTime: f32,  // time for wave generator
       intensityFilter: f32, // intensity filter strength, 0 = off
       intensityMult: f32,   // intensity rendering multiplier
       waveSourceType: f32,  // source type: 0=plane, 1=point
       waveform: f32,        // waveform: 0=sine, 1=square, 2=triangle, 3=sawtooth
+      globalAlpha: f32,     // global alpha multiplier
+      plusXAlpha: f32,      // +x projection alpha multiplier
+      padding: vec2f
     };
   `;
 
-const uniformValues = new Float32Array(36);
+const uniformValues = new Float32Array(40);
 
 const kMatrixOffset = 0;
 const kCamPosOffset = 16;
@@ -38,11 +42,14 @@ const kRayDtMultOffset = 23;
 const kVolSizeNormOffset = 24;
 const kWaveOnOffset = 27;
 const kResOffset = 28;
-const kWaveSettingsOffset = 30;
+const kAmplitudeOffset = 30;
+const kTimeOffset = 31;
 const kIntensityFilterOffset = 32;
 const kIntensityMultOffset = 33;
 const kWaveSourceTypeOffset = 34;
 const kWaveformOffset = 35;
+const kGlobalAlphaOffset = 36;
+const kPlusXAlphaOffset = 37;
 
 const uni = {};
 
@@ -54,12 +61,14 @@ uni.rayDtMultValue = uniformValues.subarray(kRayDtMultOffset, kRayDtMultOffset +
 uni.volSizeNormValue = uniformValues.subarray(kVolSizeNormOffset, kVolSizeNormOffset + 3);
 uni.waveOnValue = uniformValues.subarray(kWaveOnOffset, kWaveOnOffset + 1);
 uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
-uni.ampValue = uniformValues.subarray(kWaveSettingsOffset, kWaveSettingsOffset + 1);
-uni.wavelengthValue = uniformValues.subarray(kWaveSettingsOffset + 1, kWaveSettingsOffset + 2);
+uni.ampValue = uniformValues.subarray(kAmplitudeOffset, kAmplitudeOffset + 1);
+uni.wavelengthTimeValue = uniformValues.subarray(kTimeOffset, kTimeOffset + 1);
 uni.intensityFilterValue = uniformValues.subarray(kIntensityFilterOffset, kIntensityFilterOffset + 1);
 uni.intensityMultValue = uniformValues.subarray(kIntensityMultOffset, kIntensityMultOffset + 1);
 uni.waveSourceTypeValue = uniformValues.subarray(kWaveSourceTypeOffset, kWaveSourceTypeOffset + 1);
 uni.waveformValue = uniformValues.subarray(kWaveformOffset, kWaveformOffset + 1);
+uni.globalAlphaValue = uniformValues.subarray(kGlobalAlphaOffset, kGlobalAlphaOffset + 1);
+uni.plusXAlphaValue = uniformValues.subarray(kPlusXAlphaOffset, kPlusXAlphaOffset + 1);
 
 Object.freeze(uni);
 
@@ -70,6 +79,7 @@ const textures = {
   speedTex: null,
 };
 
+let time = 0;
 let dt = 0.5;
 let oldDt;
 
@@ -152,6 +162,8 @@ function softReset() {
     { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
   );
   uni.dtValue.set([dt]);
+  time = 0;
+  uni.wavelengthTimeValue.set([0]);
 }
 
 function hardReset() {
@@ -162,6 +174,8 @@ function hardReset() {
   if (cleared) main();
   else main().then(refreshPreset);
   uni.dtValue.set([dt]);
+  time = 0;
+  uni.wavelengthTimeValue.set([0]);
 }
 
 const waveformOptions = Object.freeze({
@@ -244,7 +258,7 @@ gui.addNumericInput("f", true, "Focal length", 4, 512, 1, 192, 0, "presets", (va
 gui.addNumericInput("nCutouts", true, "# Cutouts", 1, 20, 1, 4, 0, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
 
 gui.addNumericInput("slitWidth", true, "Slit width", 3, 512, 1, 8, 0, "presets", (value) => presetSettings.DoubleSlit.slitWidth = value);
-gui.addNumericInput("slitSpacing", true, "Slit spacing", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
+gui.addNumericInput("slitSpacing", true, "Slit spacing", 0, 512, 1, 32, 0, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
 gui.addNumericInput("slitHeight", true, "Slit height", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
 
 gui.addNumericInput("radius", true, "Radius", 0, 256, 1, commonInitValues.radius, 0, "presets", (value) =>
@@ -292,11 +306,13 @@ gui.addButton("clearPreset", "Clear", true, "presets", () => updateSpeedTexture(
 
 // Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");
+gui.addNumericInput("globalAlpha", true, "Global alpha", 0.5, 5, 0.1, 1, 1, "visCtrl", (value) => uni.globalAlphaValue.set([value]), "Global alpha multiplier");
 gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
   intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
   uni.intensityFilterValue.set([intensityFilterStrength]);
 });
+gui.addNumericInput("plusXAlpha", true, "+X intensity a", 1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.plusXAlphaValue.set([value]), "+X intensity projection alpha multiplier");
 gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]), "Raw intensity value multiplier before transfer function");
 gui.addNumericInput("intensityFilter", true, "Intensity filter", 0, 3, 0.1, 1, 1, "visCtrl", (value) => {
   value = Math.pow(10, value);
@@ -329,7 +345,9 @@ gui.addGroup("extraInfo", null, `
   <div>
     Click on section titles to expand/collapse
     <br>
-    Hover on numeric input labels for more info if applicable, click to toggle between raw number and slider type input
+    Hover on input labels for more info if applicable
+    <br>
+    Click to toggle between raw number and slider type input
     <br>
   </div>
 `);

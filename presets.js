@@ -8,7 +8,7 @@ const shapes = Object.freeze({
 });
 
 const presetSettings = {
-  DoubleSlit: { slitWidth: 8, slitSpacing: 64, slitHeight: 64 },
+  DoubleSlit: { slitWidth: 8, slitSpacing: 32, slitHeight: 64 },
   Aperture: { shape: shapes.circular, radius: commonInitValues.radius, invert: false },
   ZonePlate: { shape: shapes.circular, f: 192, nCutouts: 4 },
   Lens: { thickness: 16, radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, half: 0, outerBarrier: true },

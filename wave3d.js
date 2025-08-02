@@ -85,14 +85,6 @@ async function main() {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-
-  // time for wave generator
-  const timeBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    label: "timeBuffer"
-  });
-
   // compute workgroup size 16*8*8 | 32*8*4 | 64*4*4 = 1024 threads if maxComputeInvocationsPerWorkgroup >= 1024, otherwise 16*4*4 = 256 threads
   const [wg_x, wg_y, wg_z] = maxComputeInvocationsPerWorkgroup >= 1024 ? [16, 8, 8] : [16, 4, 4];
 
@@ -104,8 +96,7 @@ async function main() {
       @group(0) @binding(1) var past_future:  texture_storage_3d<r32float, read_write>;
       @group(0) @binding(2) var present:      texture_storage_3d<r32float, read>;
       @group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
-      @group(0) @binding(4) var<storage, read_write> time: f32;
-      @group(0) @binding(5) var intensity:    texture_storage_3d<r32float, read_write>;
+      @group(0) @binding(4) var intensity:    texture_storage_3d<r32float, read_write>;
 
       const WG_X: u32 = ${wg_x};
       const WG_Y: u32 = ${wg_y};
@@ -167,7 +158,6 @@ async function main() {
       fn main(
         @builtin(global_invocation_id) gid: vec3u
       ) {
-        if (all(gid == vec3u(0))) { time += uni.dt; }
 
         let volSize = vec3u(uni.volSize);
         let gid_i = vec3i(gid);
@@ -186,20 +176,19 @@ async function main() {
         // wave generator
         if (uni.waveOn > 0) {
           // Wave generators
-          let wavelengthAdjustedTime = time / uni.waveSettings.y;
-          var wave = uni.waveSettings.x;
+          var wave = uni.amplitude;
           switch (u32(uni.waveform)) {
             case 0: { // sine
-              wave *= sin(6.28f * wavelengthAdjustedTime);
+              wave *= sin(6.28f * uni.wavelengthTime);
             }
             case 1: { // square
-              wave *= 4 * floor(wavelengthAdjustedTime) - 2 * floor(2 * wavelengthAdjustedTime) + 1;
+              wave *= 4 * floor(uni.wavelengthTime) - 2 * floor(2 * uni.wavelengthTime) + 1;
             }
             case 2: { // triangle
-              wave *= 4 * abs(wavelengthAdjustedTime - floor(wavelengthAdjustedTime + 0.75) + 0.25) - 1;
+              wave *= 4 * abs(uni.wavelengthTime - floor(uni.wavelengthTime + 0.75) + 0.25) - 1;
             }
             case 3: { // sawtooth
-              wave *= 2 * (wavelengthAdjustedTime - floor(wavelengthAdjustedTime + 0.5));
+              wave *= 2 * (uni.wavelengthTime - floor(uni.wavelengthTime + 0.5));
             }
             default: {
               wave *= 0;
@@ -252,7 +241,7 @@ async function main() {
         // write to intensity texture (adds several ms to compute time)
         if (uni.intensityFilter > 0) {
           let current = textureLoad(intensity, gid);
-          textureStore(intensity, gid, current + (newValue * newValue - current) / (uni.intensityFilter + uni.waveSettings.y));
+          textureStore(intensity, gid, current + (newValue * newValue - current) / uni.intensityFilter);
         }
       }
     `,
@@ -272,8 +261,7 @@ async function main() {
       { binding: 1, resource: tex0.createView() },
       { binding: 2, resource: tex1.createView() },
       { binding: 3, resource: textures.speedTex.createView() },
-      { binding: 4, resource: { buffer: timeBuffer } },
-      { binding: 5, resource: textures.intensityTex.createView() },
+      { binding: 4, resource: textures.intensityTex.createView() },
     ],
     label: "wave compute bind group"
   });
@@ -423,7 +411,8 @@ async function main() {
 
       // value to color: cyan -> blue -> transparent (0) -> red -> yellow
       fn transferFn(value: f32) -> vec4f {
-        let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
+        // let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
+        let a = clamp(value * value * 0.1, 0, 0.01) * uni.globalAlpha;
         return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1)) * 10; // 10x for beer-lambert
       }
 
@@ -454,11 +443,11 @@ async function main() {
         return vec4f(select(higher, lower, cutoff), color.a);
       }
 
-      // Old alpha blending method, add to accumulated color
-      fn oldBlend(sampleColor: vec4f, accumulatedColor: vec4f) -> vec4f {
-        return vec4f(sampleColor.rgb, 1) * (1.0 - accumulatedColor.a) * sampleColor.a;
-        //  color *= select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
-      }
+      // // Old alpha blending method, add to accumulated color
+      // fn oldBlend(sampleColor: vec4f, accumulatedColor: vec4f) -> vec4f {
+      //   return vec4f(sampleColor.rgb, 1) * (1.0 - accumulatedColor.a) * sampleColor.a;
+      //   //  color *= select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
+      // }
 
       @fragment
       fn fs(@location(0) fragCoord: vec2f) -> @location(0) vec4f {
@@ -510,12 +499,17 @@ async function main() {
 
           var sampleColor = vec4f(select(min(abs(1 - speed), 0.05) * 10, 0.0, speed == 1));
           
-          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
+          var sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
           
           if (sampleValue == 0.0 && speed == 1) { continue; } // skip empty samples
           
-          sampleColor += transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
-          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= 2.0; }
+          if (renderIntensity) {
+            sampleValue *= uni.intensityMult;
+          }
+          
+          sampleColor += transferFn(sampleValue);
+          
+          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= uni.plusXAlpha; }
 
           color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
 
@@ -617,6 +611,8 @@ async function main() {
     const canvasTexture = context.getCurrentTexture();
     renderPassDescriptor.colorAttachments[0].view = canvasTexture.createView();
 
+    uni.wavelengthTimeValue.set([(time += dt) / wavelength]);
+
     device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
     const encoder = device.createCommandEncoder();
@@ -628,7 +624,8 @@ async function main() {
         if (amp <= 5e-2) {
           amp = 0;
           uni.waveOnValue.set([0]);
-          device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
+          time = 0;
+          uni.wavelengthTimeValue.set([0]);
         }
         uni.ampValue.set([amp]);
       }
@@ -687,13 +684,14 @@ async function main() {
   uni.rayDtMultValue.set([2]);
   uni.resValue.set([canvas.width, canvas.height]);
   uni.ampValue.set([amp]);
-  uni.wavelengthValue.set([wavelength]);
   uni.intensityFilterValue.set([intensityFilterStrength]);
   uni.intensityMultValue.set([1]);
   uni.waveSourceTypeValue.set([0]);
-  uni.waveformValue.set([1]);
-
-  device.queue.writeBuffer(timeBuffer, 0, new Float32Array([0]));
+  uni.waveformValue.set([0]);
+  uni.globalAlphaValue.set([1]);
+  uni.plusXAlphaValue.set([2]);
+  time = 0;
+  uni.wavelengthTimeValue.set([0]);
 
   rafId = requestAnimationFrame(render);
 }
