@@ -485,41 +485,63 @@ async function main() {
         let rayDt = uni.rayDtMult * min(rayDtVec.x, min(rayDtVec.y, rayDtVec.z));
 
         let offset = pcgHash(fragCoord.x + uni.resolution.x * fragCoord.y) * rayDt;
-        var rayPos = rayOrigin + (t0 + offset) * rayDir;
+        var rayPos = (rayOrigin + (t0 + offset) * rayDir) / uni.volSizeNorm;
+        let rayDirNorm = rayDir / uni.volSizeNorm;
 
         var color = vec4f(0);
         let renderIntensity = uni.intensityFilter > 0;
+        let intensityMult = select(1.0, uni.intensityMult, renderIntensity);
+        let plusXLimit = 1.0 - uni.rayDtMult / uni.volSize.x;
 
-        for (var i = t0; i < intersection.y; i += rayDt) {
-          let adjDt = min(rayDt, intersection.y - i);
+        var remainingDist = intersection.y - t0;
 
-          // sample at normalized current ray position
-          let samplePos = rayPos / uni.volSizeNorm;
-          // increment ray position
-          rayPos += rayDir * adjDt;
+        loop {
+          if (remainingDist <= 0.0) { break; }
 
+          let adjDt = min(rayDt, remainingDist);
+          let samplePos = rayPos;
+
+          // Precompute position increment
+          rayPos += rayDirNorm * adjDt;
+          remainingDist -= adjDt;
+
+          // Sample speed
           let speed = textureSampleLevel(speedTexture, stateSampler, samplePos, 0).r;
 
-          // opaque barrier
+          // Early exit on barrier
           if (speed <= 0.0) {
-            color += vec4f((1.0 - color.a) * (1.0 - exp(-adjDt)));
+            // Barrier blend
+            color += vec4f((1.0 - color.a) * (1.0 - exp(-adjDt)));; // Barrier color
             break;
           }
-          
-          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r;
-          
-          if (sampleValue == 0 && speed == 1) { continue; } // skip empty samples
 
-          var sampleColor = transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
-          if (speed != 1.0) { sampleColor += vec4f(min(abs(1 - speed), 0.05) * 10); }
-          
-          // let alphaMult = select(1.0, 2, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
-          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= uni.plusXAlpha; }
+          // Sample state
+          let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r * intensityMult;
 
+          // Skip if empty and not a boundary
+          if (sampleValue == 0.0 && speed == 1.0) {
+            continue;
+          }
+          
+          // inlined transfer function
+          let a = clamp(sampleValue * sampleValue * 0.1, 0, 0.01) * uni.globalAlpha;
+          var sampleColor = clamp(vec4f(sampleValue, (abs(sampleValue) - 1) * 0.5, -sampleValue, a), vec4f(0), vec4f(1)) * 10;
+
+          // Slight opacity to refractive materials
+          sampleColor += f32(speed != 1.0) * vec4f(min(abs(1.0 - speed), 0.05) * 10.0);
+
+          // +X face emphasis
+          if (renderIntensity && samplePos.x >= plusXLimit) {
+            sampleColor.a *= uni.plusXAlpha;
+          }
+
+          // Exponential blending
           color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
 
-          // exit if almost opaque
-          // if (color.a >= 0.95) { break; }
+          // Exit if nearly opaque
+          // if (color.a >= 0.95) {
+          //   break;
+          // }
         }
         return linear2srgb(color);
       }
@@ -587,7 +609,7 @@ async function main() {
   function render() {
     const startTime = performance.now();
     deltaTime += (startTime - lastFrameTime - deltaTime) / filterStrength;
-    const speedMultiplier = Math.max(deltaTime, 50);
+    const speedMultiplier = Math.min(deltaTime, 50);
     fps += (1e3 / deltaTime - fps) / filterStrength;
     lastFrameTime = startTime;
 
