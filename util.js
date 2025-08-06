@@ -306,7 +306,7 @@ gui.addButton("clearPreset", "Clear", true, "presets", () => updateSpeedTexture(
 
 // Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");
-gui.addNumericInput("globalAlpha", true, "Global alpha", 0.5, 5, 0.1, 1, 1, "visCtrl", (value) => uni.globalAlphaValue.set([value]), "Global alpha multiplier");
+gui.addNumericInput("globalAlpha", true, "Global alpha", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.globalAlphaValue.set([value]), "Global alpha multiplier");
 gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
   intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
@@ -314,7 +314,7 @@ gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) =
 });
 gui.addNumericInput("plusXAlpha", true, "+X intensity a", 1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.plusXAlphaValue.set([value]), "+X intensity projection alpha multiplier");
 gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]), "Raw intensity value multiplier before transfer function");
-gui.addNumericInput("intensityFilter", true, "Intensity filter", 0, 3, 0.1, 1, 1, "visCtrl", (value) => {
+gui.addNumericInput("intensityFilter", true, "Intensity filter", 0, 3, 0.1, 2, 1, "visCtrl", (value) => {
   value = Math.pow(10, value);
   defaultIntensityFilterStrength = value;
   intensityFilterStrength = gui.io.intensity.checked ? defaultIntensityFilterStrength : 0;

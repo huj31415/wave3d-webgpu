@@ -31,6 +31,15 @@ async function main() {
       alert(`Max buffer size exceeded. Your device supports max size ${maxBufferSize}, specified size ${simVoxelCount() * 4}`);
     // else alert(msg);
   });
+
+  // restart if device crashes
+  device.lost.then((info) => {
+    if (info.reason != "destroyed") {
+      hardReset();
+      console.warn("WebGPU device lost, reinitializing.");
+    }
+  });
+
   // }
   if (!device) {
     alert("Browser does not support WebGPU");
@@ -44,7 +53,7 @@ async function main() {
     format: swapChainFormat,
   });
 
-  // texture layout: r32float if float32-filterable available, else r16float
+  // texture layout: r32float
   // 1: texture_storage_3d r32float<rw> past/future
   // 2: texture_storage_3d r32float<r> present
   // 3: texture_storage_3d r32float<r> speed
@@ -164,7 +173,7 @@ async function main() {
 
         // check if the index is within bounds
         if (any(gid >= volSize)) { return; }
-        
+
         // read the wave speed and write 0 if barrier
         let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
         if (cdt <= 0) {
@@ -501,15 +510,16 @@ async function main() {
           
           if (sampleValue == 0 && speed == 1) { continue; } // skip empty samples
 
-          let sampleColor = vec4f(min(abs(1 - speed), 0.05) * 10) + transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
+          var sampleColor = transferFn(sampleValue * select(1.0, uni.intensityMult, renderIntensity));
+          if (speed != 1.0) { sampleColor += vec4f(min(abs(1 - speed), 0.05) * 10); }
           
-          let alphaMult = select(1.0, uni.plusXAlpha, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
-          // if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= uni.plusXAlpha; }
+          // let alphaMult = select(1.0, 2, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
+          if (renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x) { sampleColor.a *= uni.plusXAlpha; }
 
-          color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt * alphaMult)) * vec4f(sampleColor.rgb, 1);
+          color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
 
           // exit if almost opaque
-          if (color.a >= 0.95) { break; }
+          // if (color.a >= 0.95) { break; }
         }
         return linear2srgb(color);
       }
@@ -577,30 +587,33 @@ async function main() {
   function render() {
     const startTime = performance.now();
     deltaTime += (startTime - lastFrameTime - deltaTime) / filterStrength;
+    const speedMultiplier = Math.max(deltaTime, 50);
     fps += (1e3 / deltaTime - fps) / filterStrength;
     lastFrameTime = startTime;
 
     if (keyOrbit) {
+      const speed = KEY_ROT_SPEED * speedMultiplier;
       camera.orbit(
-        (keyState.orbit.left - keyState.orbit.right) * KEY_ROT_SPEED * deltaTime,
-        (keyState.orbit.up - keyState.orbit.down) * KEY_ROT_SPEED * deltaTime
+        (keyState.orbit.left - keyState.orbit.right) * speed,
+        (keyState.orbit.up - keyState.orbit.down) * speed
       );
     }
     if (keyPan) {
+      const speed = KEY_PAN_SPEED * speedMultiplier;
       camera.pan(
-        (keyState.pan.left - keyState.pan.right) * KEY_PAN_SPEED * deltaTime,
-        (keyState.pan.up - keyState.pan.down) * KEY_PAN_SPEED * deltaTime,
-        (keyState.pan.forward - keyState.pan.backward) * KEY_PAN_SPEED * deltaTime
+        (keyState.pan.left - keyState.pan.right) * speed,
+        (keyState.pan.up - keyState.pan.down) * speed,
+        (keyState.pan.forward - keyState.pan.backward) * speed
       );
     }
     if (keyZoom) {
-      camera.zoom((keyState.zoom.out - keyState.zoom.in) * KEY_ZOOM_SPEED * deltaTime);
+      camera.zoom((keyState.zoom.out - keyState.zoom.in) * KEY_ZOOM_SPEED * speedMultiplier);
     }
     if (keyFOV) {
-      camera.adjFOV((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * deltaTime);
+      camera.adjFOV((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * speedMultiplier);
     }
     if (keyFOVWithoutZoom) {
-      camera.adjFOVWithoutZoom((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * deltaTime);
+      camera.adjFOVWithoutZoom((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * speedMultiplier);
     }
 
     const canvasTexture = context.getCurrentTexture();
