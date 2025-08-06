@@ -206,13 +206,12 @@ async function main() {
 
           let isPlane = uni.waveSourceType == 0;
 
+          let applyWave = (isPlane && gid.x == 0) || (!isPlane && all(gid == vec3u(8, volSize.y / 2, volSize.z / 2)));
+
           // write wave source to texture
-          if (isPlane && gid.x == 0) {
+          if (applyWave) {
             // write to the past/future texture
-            textureStore(past_future, gid, vec4f(wave, 0.0, 0.0, 0.0));
-            return;
-          } else if (!isPlane && all(gid == vec3u(8, volSize.y / 2, volSize.z / 2))) {
-            textureStore(past_future, gid, vec4f(200.0 * wave, 0.0, 0.0, 0.0));
+            textureStore(past_future, gid, vec4f(wave, 0.0, 0.0, 0.0) * select(200.0, 1.0, isPlane));
             return;
           }
         }
@@ -221,11 +220,13 @@ async function main() {
         let pastValue = textureLoad(past_future, gid).r;
         let presentValue = textureLoad(present, gid).r;
 
-        var laplacian = -6.0 * presentValue;
-        
-        for (var i = 0; i < 6; i++) {
-          laplacian += textureLoad(present, gid_i + directions[i]).r;
-        }
+        var laplacian = -6.0 * presentValue
+          + textureLoad(present, gid_i + directions[0]).r
+          + textureLoad(present, gid_i + directions[1]).r
+          + textureLoad(present, gid_i + directions[2]).r
+          + textureLoad(present, gid_i + directions[3]).r
+          + textureLoad(present, gid_i + directions[4]).r
+          + textureLoad(present, gid_i + directions[5]).r;
 
         // var laplacian = -88.0 * presentValue;
 
@@ -418,12 +419,12 @@ async function main() {
         return output;
       }
 
-      // value to color: cyan -> blue -> transparent (0) -> red -> yellow
-      fn transferFn(value: f32) -> vec4f {
-        // let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
-        let a = clamp(value * value * 0.1, 0, 0.01) * uni.globalAlpha;
-        return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1)) * 10; // 10x for beer-lambert
-      }
+      // // value to color: cyan -> blue -> transparent (0) -> red -> yellow
+      // fn transferFn(value: f32) -> vec4f {
+      //   // let a = 1.0 - pow(1.0 - clamp(value * value * 0.1, 0, 0.01), uni.rayDtMult);
+      //   let a = clamp(value * value * 0.1, 0, 0.01) * uni.globalAlpha;
+      //   return clamp(vec4f(value, (abs(value) - 1) * 0.5, -value, a), vec4f(0), vec4f(1)) * 10; // 10x for beer-lambert
+      // }
 
       fn rayBoxIntersect(start: vec3f, dir: vec3f) -> vec2f {
         let box_min = vec3f(0);
