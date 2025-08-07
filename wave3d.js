@@ -89,17 +89,14 @@ async function main() {
   });
   updateSpeedTexture();
 
-  const uniformBuffer = device.createBuffer({
-    size: uniformValues.byteLength,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
+  const uniformBuffer = uni.createBuffer(device);
 
   // compute workgroup size 16*8*8 | 32*8*4 | 64*4*4 = 1024 threads if maxComputeInvocationsPerWorkgroup >= 1024, otherwise 16*4*4 = 256 threads
   const [wg_x, wg_y, wg_z] = maxComputeInvocationsPerWorkgroup >= 1024 ? [16, 8, 8] : [16, 4, 4];
 
   const waveComputeModule = device.createShaderModule({
     code: `
-      ${wgslUniformStruct}
+      ${uni.uniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var past_future:  texture_storage_3d<r32float, read_write>;
@@ -182,36 +179,15 @@ async function main() {
           return;
         }
 
-        // wave generator
+        // wave
         if (uni.waveOn > 0) {
-          // Wave generators
-          var wave = uni.amplitude;
-          switch (u32(uni.waveform)) {
-            case 0: { // sine
-              wave *= sin(6.28f * uni.wavelengthTime);
-            }
-            case 1: { // square
-              wave *= 4 * floor(uni.wavelengthTime) - 2 * floor(2 * uni.wavelengthTime) + 1;
-            }
-            case 2: { // triangle
-              wave *= 4 * abs(uni.wavelengthTime - floor(uni.wavelengthTime + 0.75) + 0.25) - 1;
-            }
-            case 3: { // sawtooth
-              wave *= 2 * (uni.wavelengthTime - floor(uni.wavelengthTime + 0.5));
-            }
-            default: {
-              wave *= 0;
-            }
-          }
-
           let isPlane = uni.waveSourceType == 0;
-
           let applyWave = (isPlane && gid.x == 0) || (!isPlane && all(gid == vec3u(8, volSize.y / 2, volSize.z / 2)));
 
           // write wave source to texture
           if (applyWave) {
             // write to the past/future texture
-            textureStore(past_future, gid, vec4f(wave, 0.0, 0.0, 0.0) * select(200.0, 1.0, isPlane));
+            textureStore(past_future, gid, vec4f(uni.waveValue, 0.0, 0.0, 0.0) * select(200.0, 1.0, isPlane));
             return;
           }
         }
@@ -278,7 +254,7 @@ async function main() {
 
   const boundaryComputeModule = device.createShaderModule({
     code: `
-      ${wgslUniformStruct}
+      ${uni.uniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var future:       texture_storage_3d<r32float, read_write>;
@@ -394,7 +370,7 @@ async function main() {
 
   const renderModule = device.createShaderModule({
     code: `
-      ${wgslUniformStruct}
+      ${uni.uniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
       @group(0) @binding(1) var stateTexture: texture_3d<f32>;
@@ -609,7 +585,7 @@ async function main() {
 
   function render() {
     const startTime = performance.now();
-    deltaTime += (startTime - lastFrameTime - deltaTime) / filterStrength;
+    deltaTime += Math.min(startTime - lastFrameTime - deltaTime, 1e4) / filterStrength;
     const speedMultiplier = Math.min(deltaTime, 50);
     fps += (1e3 / deltaTime - fps) / filterStrength;
     lastFrameTime = startTime;
@@ -642,23 +618,43 @@ async function main() {
     const canvasTexture = context.getCurrentTexture();
     renderPassDescriptor.colorAttachments[0].view = canvasTexture.createView();
 
-    uni.wavelengthTimeValue.set([(time += dt) / wavelength]);
-
-    device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+    // device.queue.writeBuffer(uniformBuffer, 0, uni.uniformData);
+    uni.update(device.queue);
 
     const encoder = device.createCommandEncoder();
 
-    if (dt > 0) {
-      if (!waveOn && amp > 0) {
+    const run = dt > 0
+
+    if (run) {
+      if (!waveOn && waveSettings.amp > 0) {
         // ease wave off
-        amp -= 0.2 * amp;
-        if (amp <= 5e-2) {
-          amp = 0;
-          uni.waveOnValue.set([0]);
+        waveSettings.amp -= 0.2 * waveSettings.amp;
+        if (waveSettings.amp <= 5e-2) {
+          waveSettings.amp = 0;
+          uni.values.waveOn.set([0]);
           time = 0;
-          uni.wavelengthTimeValue.set([0]);
         }
-        uni.ampValue.set([amp]);
+      }
+      if (waveOn || waveSettings.amp > 0) {
+        let wave = waveSettings.amp;
+        let wavelengthTime = (time += dt) / waveSettings.wavelength;
+        switch (waveSettings.waveform) {
+          case waveformOptions.sine:
+            wave *= Math.sin(Math.PI * 2 * wavelengthTime);
+            break;
+          case waveformOptions.square:
+            wave *= 4 * Math.floor(wavelengthTime) - 2 * Math.floor(2 * wavelengthTime) + 1;
+            break;
+          case waveformOptions.triangle:
+            wave *= 4 * Math.abs(wavelengthTime - Math.floor(wavelengthTime + 0.75) + 0.25) - 1;
+            break;
+          case waveformOptions.sawtooth:
+            wave *= 2 * (wavelengthTime - Math.floor(wavelengthTime + 0.5));
+            break;
+          default:
+            wave *= 0;
+        }
+        uni.values.waveValue.set([wave]);
       }
 
       const waveComputePass = waveComputeTimingHelper.beginComputePass(encoder);
@@ -685,7 +681,7 @@ async function main() {
     const commandBuffer = encoder.finish();
     device.queue.submit([commandBuffer]);
 
-    if (dt > 0) {
+    if (run) {
       waveComputeTimingHelper.getResult().then(gpuTime => waveComputeTime += (gpuTime / 1e6 - waveComputeTime) / filterStrength);
       boundaryComputeTimingHelper.getResult().then(gpuTime2 => boundaryComputeTime += (gpuTime2 / 1e6 - boundaryComputeTime) / filterStrength);
     } else {
@@ -708,21 +704,18 @@ async function main() {
 
   camera.updatePosition();
 
-  uni.dtValue.set([dt]);
-  uni.volSizeValue.set(simulationDomain);
-  uni.volSizeNormValue.set(simulationDomainNorm);
-  uni.waveOnValue.set([1]);
-  uni.rayDtMultValue.set([2]);
-  uni.resValue.set([canvas.width, canvas.height]);
-  uni.ampValue.set([amp]);
-  uni.intensityFilterValue.set([intensityFilterStrength]);
-  uni.intensityMultValue.set([1]);
-  uni.waveSourceTypeValue.set([0]);
-  uni.waveformValue.set([0]);
-  uni.globalAlphaValue.set([2]);
-  uni.plusXAlphaValue.set([2]);
+  uni.values.dt.set([dt]);
+  uni.values.volSize.set(simulationDomain);
+  uni.values.volSizeNorm.set(simulationDomainNorm);
+  uni.values.waveOn.set([1]);
+  uni.values.rayDtMult.set([2]);
+  uni.values.resolution.set([canvas.width, canvas.height]);
+  uni.values.intensityFilter.set([intensityFilterStrength]);
+  uni.values.intensityMult.set([1]);
+  uni.values.waveSourceType.set([0]);
+  uni.values.globalAlpha.set([2]);
+  uni.values.plusXAlpha.set([2]);
   time = 0;
-  uni.wavelengthTimeValue.set([0]);
 
   rafId = requestAnimationFrame(render);
 }

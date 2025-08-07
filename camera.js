@@ -55,9 +55,9 @@ class Camera {
     const aspect = canvas.clientWidth / canvas.clientHeight;
     const proj = mat4.perspective(this.fov, aspect, this.near, this.far)
     const view = mat4.lookAt(this.position, this.target, this.worldUp);
-    mat4.invert(mat4.multiply(proj, view), uni.matrixValue);
+    uni.values.invMatrix.set(mat4.invert(mat4.multiply(proj, view)));
 
-    uni.cameraPosValue.set(this.position);
+    uni.values.cameraPos.set(this.position);
   }
 
   updatePosition() {

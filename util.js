@@ -3,74 +3,26 @@
 // 16-19: vec3f cameraPos, f32 dt
 // 20-23: vec3f volSize, f32 rayDelta
 // 24-27: vec3f volSizeNorm, f32 waveOn
-// 28-31: vec2f resolution, f32 amplitude, f32 time
-// 32-35: f32 intensityFilter, f32 intensityMultiplier, f32 waveSourceType, f32 waveform
-// 36-39: f32 global alpha multiplier, f32 +x projection alpha multiplier, vec2f padding
+// 28-31: vec2f resolution, f32 waveValue, f32 intensityFilter
+// 32-35: f32 intensityMultiplier, f32 waveSourceType, f32 global alpha multiplier, f32 +x projection alpha multiplier
 // total 36 * f32 = 144 bytes
 
-// add alpha multiplier and +x projection alpha multiplier
-
-const wgslUniformStruct = `
-    struct Uniforms {
-      invMatrix: mat4x4f,   // inverse proj*view matrix
-      cameraPos: vec3f,     // camera position in world space
-      dt: f32,              // simulation time step
-      volSize: vec3f,       // volume size in voxels
-      rayDtMult: f32,       // raymarch sampling factor
-      volSizeNorm: vec3f,   // normalized volume size (volSize / max(volSize))
-      waveOn: f32,          // whether the wave is on or not
-      resolution: vec2f,    // canvas resolution: x-width, y-height
-      amplitude: f32,       // wave amplitude
-      wavelengthTime: f32,  // time for wave generator
-      intensityFilter: f32, // intensity filter strength, 0 = off
-      intensityMult: f32,   // intensity rendering multiplier
-      waveSourceType: f32,  // source type: 0=plane, 1=point
-      waveform: f32,        // waveform: 0=sine, 1=square, 2=triangle, 3=sawtooth
-      globalAlpha: f32,     // global alpha multiplier
-      plusXAlpha: f32,      // +x projection alpha multiplier
-      padding: vec2f
-    };
-  `;
-
-const uniformValues = new Float32Array(40);
-
-const kMatrixOffset = 0;
-const kCamPosOffset = 16;
-const kDtOffset = 19;
-const kVolSizeOffset = 20;
-const kRayDtMultOffset = 23;
-const kVolSizeNormOffset = 24;
-const kWaveOnOffset = 27;
-const kResOffset = 28;
-const kAmplitudeOffset = 30;
-const kTimeOffset = 31;
-const kIntensityFilterOffset = 32;
-const kIntensityMultOffset = 33;
-const kWaveSourceTypeOffset = 34;
-const kWaveformOffset = 35;
-const kGlobalAlphaOffset = 36;
-const kPlusXAlphaOffset = 37;
-
-const uni = {};
-
-uni.matrixValue = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
-uni.cameraPosValue = uniformValues.subarray(kCamPosOffset, kCamPosOffset + 3);
-uni.dtValue = uniformValues.subarray(kDtOffset, kDtOffset + 1);
-uni.volSizeValue = uniformValues.subarray(kVolSizeOffset, kVolSizeOffset + 3);
-uni.rayDtMultValue = uniformValues.subarray(kRayDtMultOffset, kRayDtMultOffset + 1);
-uni.volSizeNormValue = uniformValues.subarray(kVolSizeNormOffset, kVolSizeNormOffset + 3);
-uni.waveOnValue = uniformValues.subarray(kWaveOnOffset, kWaveOnOffset + 1);
-uni.resValue = uniformValues.subarray(kResOffset, kResOffset + 2);
-uni.ampValue = uniformValues.subarray(kAmplitudeOffset, kAmplitudeOffset + 1);
-uni.wavelengthTimeValue = uniformValues.subarray(kTimeOffset, kTimeOffset + 1);
-uni.intensityFilterValue = uniformValues.subarray(kIntensityFilterOffset, kIntensityFilterOffset + 1);
-uni.intensityMultValue = uniformValues.subarray(kIntensityMultOffset, kIntensityMultOffset + 1);
-uni.waveSourceTypeValue = uniformValues.subarray(kWaveSourceTypeOffset, kWaveSourceTypeOffset + 1);
-uni.waveformValue = uniformValues.subarray(kWaveformOffset, kWaveformOffset + 1);
-uni.globalAlphaValue = uniformValues.subarray(kGlobalAlphaOffset, kGlobalAlphaOffset + 1);
-uni.plusXAlphaValue = uniformValues.subarray(kPlusXAlphaOffset, kPlusXAlphaOffset + 1);
-
-Object.freeze(uni);
+const uni = new Uniforms();
+uni.addUniform("invMatrix", "mat4x4f");   // inverse proj*view matrix
+uni.addUniform("cameraPos", "vec3f");     // camera position in world space
+uni.addUniform("dt", "f32");              // simulation time step
+uni.addUniform("volSize", "vec3f");       // volume size in voxels
+uni.addUniform("rayDtMult", "f32");       // raymarch sampling factor
+uni.addUniform("volSizeNorm", "vec3f");   // normalized volume size (volSize / max(volSize))
+uni.addUniform("waveOn", "f32");          // whether the wave is on or not
+uni.addUniform("resolution", "vec2f");    // canvas resolution: x-width, y-height
+uni.addUniform("waveValue", "f32");       // wave value at current time
+uni.addUniform("intensityFilter", "f32"); // intensity filter strength, 0 = off
+uni.addUniform("intensityMult", "f32");   // intensity rendering multiplier
+uni.addUniform("waveSourceType", "f32");  // source type: 0=plane, 1=point
+uni.addUniform("globalAlpha", "f32");     // global alpha multiplier
+uni.addUniform("plusXAlpha", "f32");      // +x face alpha multiplier
+uni.finalize();
 
 const textures = {
   stateTex0: null,
@@ -90,7 +42,18 @@ let waveOn = true;
 let defaultIntensityFilterStrength = 100;
 let intensityFilterStrength = defaultIntensityFilterStrength;
 
-let amp = 1, ampVal = amp, wavelength = 6;
+const waveformOptions = Object.freeze({
+  sine: 0,
+  square: 1,
+  triangle: 2,
+  sawtooth: 3
+});
+
+const waveSettings = {
+  wavelength: 6,
+  waveform: waveformOptions.sine,
+  amp: 1
+}
 
 // simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
 const simulationDomain = [384, 256, 256];//[768, 384, 384];
@@ -161,9 +124,9 @@ function softReset() {
     { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
     { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
   );
-  uni.dtValue.set([dt]);
+  uni.values.dt.set([dt]);
   time = 0;
-  uni.wavelengthTimeValue.set([0]);
+  uni.values.waveValue.set([0]);
 }
 
 function hardReset() {
@@ -173,17 +136,10 @@ function hardReset() {
   textures.speedTex.destroy();
   if (cleared) main();
   else main().then(refreshPreset);
-  uni.dtValue.set([dt]);
+  uni.values.dt.set([dt]);
   time = 0;
-  uni.wavelengthTimeValue.set([0]);
+  uni.values.waveValue.set([0]);
 }
-
-const waveformOptions = Object.freeze({
-  sine: 0,
-  square: 1,
-  triangle: 2,
-  sawtooth: 3
-});
 
 
 const canvas = document.getElementById("canvas");
@@ -222,24 +178,23 @@ gui.addNumericInput("dt", true, "dt (reinit)", 0, 1, 0.01, dt, 2, "simCtrl", (ne
 gui.addNumericInput("xSize", false, "X size (reinit)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value, "Requires reinitialization to apply");
 gui.addNumericInput("ySize", false, "Y size (reinit)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value, "Requires reinitialization to apply");
 gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value, "Requires reinitialization to apply");
-gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => { wavelength = value; uni.wavelengthValue.set([wavelength]); });
-gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { amp = ampVal = value; uni.ampValue.set([amp]); });
+gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => waveSettings.wavelength = value );
+gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { waveSettings.amp = value; });
 gui.addHalfWidthGroups("waveformOptions", "sourceTypeOptions", "simCtrl");
-gui.addRadioOptions("waveform", ["sine", "square", "triangle", "sawtooth"], "sine", "waveformOptions", {}, (value) => uni.waveformValue.set([waveformOptions[value]]));
-gui.addRadioOptions("sourceType", ["plane", "point"], "plane", "sourceTypeOptions", {}, (value) => uni.waveSourceTypeValue.set([value === "plane" ? 0 : 1]));
+gui.addRadioOptions("waveform", ["sine", "square", "triangle", "sawtooth"], "sine", "waveformOptions", {}, (value) => waveSettings.waveform = waveformOptions[value]);
+gui.addRadioOptions("sourceType", ["plane", "point"], "plane", "sourceTypeOptions", {}, (value) => uni.values.waveSourceType.set([value === "plane" ? 0 : 1]));
 gui.addButton("waveOn", "Toggle wave generator", true, "simCtrl", () => {
   waveOn = !waveOn;
   if (waveOn) {
-    uni.waveOnValue.set([1]);
-    amp = ampVal;
-    uni.ampValue.set([amp]);
+    uni.values.waveOn.set([1]);
+    waveSettings.amp = gui.io.amp.value;
   }
 });
 gui.addButton("toggleSim", "Play / Pause", false, "simCtrl", () => {
   if (oldDt) {
     dt = oldDt;
     oldDt = null;
-    uni.dtValue.set([dt]);
+    uni.values.dt.set([dt]);
   } else {
     oldDt = dt;
     dt = 0;
@@ -306,19 +261,19 @@ gui.addButton("clearPreset", "Clear", true, "presets", () => updateSpeedTexture(
 
 // Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");
-gui.addNumericInput("globalAlpha", true, "Global alpha", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.globalAlphaValue.set([value]), "Global alpha multiplier");
-gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.rayDtMultValue.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
+gui.addNumericInput("globalAlpha", true, "Global alpha", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.values.globalAlpha.set([value]), "Global alpha multiplier");
+gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.values.rayDtMult.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
   intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
-  uni.intensityFilterValue.set([intensityFilterStrength]);
+  uni.values.intensityFilter.set([intensityFilterStrength]);
 });
-gui.addNumericInput("plusXAlpha", true, "+X intensity a", 1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.plusXAlphaValue.set([value]), "+X intensity projection alpha multiplier");
-gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.intensityMultValue.set([value]), "Raw intensity value multiplier before transfer function");
+gui.addNumericInput("plusXAlpha", true, "+X intensity a", 1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.values.plusXAlpha.set([value]), "+X intensity projection alpha multiplier");
+gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.values.intensityMult.set([value]), "Raw intensity value multiplier before transfer function");
 gui.addNumericInput("intensityFilter", true, "Intensity filter", 0, 3, 0.1, 2, 1, "visCtrl", (value) => {
   value = Math.pow(10, value);
   defaultIntensityFilterStrength = value;
   intensityFilterStrength = gui.io.intensity.checked ? defaultIntensityFilterStrength : 0;
-  uni.intensityFilterStrength.set([value]);
+  uni.values.intensityFilter.set([value]);
 }, "Intensity low pass filter strength");
 
 // Camera keybinds
@@ -366,7 +321,7 @@ window.onresize = window.onload = () => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   camera.updateMatrix();
-  uni.resValue.set([canvas.width, canvas.height]);
+  uni.values.resolution.set([canvas.width, canvas.height]);
   gui.io.res([window.innerWidth, window.innerHeight]);
 };
 

@@ -61,11 +61,12 @@ const flatPresets = Object.freeze({
         && (z < (args.slitSpacing - args.slitWidth) / 2 || z > (args.slitSpacing + args.slitWidth) / 2)
       ) ? -1 : 1
   ),
+  // cutout grid / 2d version of double slit
   Aperture: (y, z, args = presetSettings.Aperture) => (args.shape(y, z) >= args.radius * args.radius) ? args.invert ? 1 : -1 : args.invert ? -1 : 1,
   ZonePlate: (y, z, args = presetSettings.ZonePlate) => {
     const a = args.shape(y, z);
     const maxN = 2 * args.nCutouts;
-    const zone = (n) => n * wavelength * (args.f + n * wavelength / 4);
+    const zone = (n) => n * waveSettings.wavelength * (args.f + n * waveSettings.wavelength / 4);
     for (let n = 1; n <= maxN; n += 2)
       if (a <= zone(n) && a >= zone(n - 1)) return -1;
     return a >= zone(maxN) ? -1 : 1;
@@ -117,7 +118,7 @@ function quadSymmetricFlatPreset(preset, distance = 64, thickness = 2, args) {
  * @param {Object} args Object containing arguments for the selected preset
  */
 function phasePlate(preset, distance = 64, args) {
-  const thickness = args.autoThickness ? wavelength / (args.refractiveIndex - 1) : gui.io.lensThickness.value; // effective path length difference of 1 wavelength
+  const thickness = args.autoThickness ? waveSettings.wavelength / (args.refractiveIndex - 1) : gui.io.lensThickness.value; // effective path length difference of 1 wavelength
   for (let z = 0; z < simulationDomain[2]; z++) {
     for (let y = 0; y < simulationDomain[1]; y++) {
       for (let x = 0; x < thickness; x++) {
