@@ -153,9 +153,10 @@ async function main() {
         vec3i( 0,  0,  1), // zp
       );
 
+
       // var<workgroup> presentTile: array<f32, (WG_X + 2) * (WG_Y + 2) * (WG_Z + 2)>;
 
-      // fn localPresentIndex(idx: vec3u) -> u32 {
+      // fn localTileIndex(idx: vec3u) -> u32 {
       //   return idx.x + (WG_X + 2u) * (idx.y + (WG_Y + 2u) * idx.z);
       // }
 
@@ -279,6 +280,18 @@ async function main() {
         return textureLoad(present, idx).r + frac * (textureLoad(future, idx).r - textureLoad(future, gid_i).r);
       }
 
+      // frac1 = (cdt - 1) / (cdt + 1);
+      // frac2 = dt * cdt / (2 * (1 + cdt))
+      fn mur2ndOrder(gid_i: vec3i, index: u32, frac1: f32, frac2: f32, iAdj1: u32, iAdj2: u32) -> f32 {
+        let idx = gid_i + directions[index];
+        let presentValue = textureLoad(present, idx).r;
+        return presentValue + frac1 * (textureLoad(future, idx).r - textureLoad(future, gid_i).r)
+          + frac2 * (
+            textureLoad(present, gid_i + directions[iAdj1]).r - 2 * presentValue + textureLoad(present, gid_i + directions[iAdj1 + 1]).r
+            + textureLoad(present, gid_i + directions[iAdj2]).r - 2 * presentValue + textureLoad(present, gid_i + directions[iAdj2 + 1]).r
+          );
+      }
+
       // 3d wave compute shader
       @compute @workgroup_size(WG_X, WG_Y, WG_Z)
       fn main(
@@ -304,6 +317,7 @@ async function main() {
           textureLoad(waveSpeed, gid_i + directions[5]).r  // front
         );
         let frac = (cdt - 1) / (cdt + 1);
+        let frac2 = uni.dt * cdt / (2 * (1 + cdt));
 
         var boundaryValue = 0.0;
         var boundaryCount = 0;
@@ -311,34 +325,40 @@ async function main() {
         // apply boundary conditions
         // xn
         if ((uni.waveOn == 0 && gid.x == 0) || adjSpeeds[0] < 0) {
-          boundaryValue += mur1stOrder(gid_i, 1, frac);
+          // boundaryValue += mur1stOrder(gid_i, 1, frac);
+          boundaryValue += mur2ndOrder(gid_i, 1, frac, frac2, 2, 4);
           boundaryCount += 1;
         }
         // xp
         if (gid.x == volSize.x - 1 || adjSpeeds[1] < 0) {
-          boundaryValue += mur1stOrder(gid_i, 0, frac);
+          // boundaryValue += mur1stOrder(gid_i, 0, frac);
+          boundaryValue += mur2ndOrder(gid_i, 0, frac, frac2, 2, 4);
           boundaryCount += 1;
         }
 
         // yn
         if (gid.y == 0 || adjSpeeds[2] < 0) {
-          boundaryValue += mur1stOrder(gid_i, 3, frac);
+          // boundaryValue += mur1stOrder(gid_i, 3, frac);
+          boundaryValue += mur2ndOrder(gid_i, 3, frac, frac2, 0, 4);
           boundaryCount += 1;
         }
         // yp
         if (gid.y == volSize.y - 1 || adjSpeeds[3] < 0) {
-          boundaryValue += mur1stOrder(gid_i, 2, frac);
+          // boundaryValue += mur1stOrder(gid_i, 2, frac);
+          boundaryValue += mur2ndOrder(gid_i, 2, frac, frac2, 0, 4);
           boundaryCount += 1;
         }
 
         // zn
         if (gid.z == 0 || adjSpeeds[4] < 0) {
-          boundaryValue += mur1stOrder(gid_i, 5, frac);
+          // boundaryValue += mur1stOrder(gid_i, 5, frac);
+          boundaryValue += mur2ndOrder(gid_i, 5, frac, frac2, 0, 2);
           boundaryCount += 1;
         }
         // zp
         if (gid.z == volSize.z - 1 || adjSpeeds[5] < 0) {
-          boundaryValue += mur1stOrder(gid_i, 4, frac);
+          // boundaryValue += mur1stOrder(gid_i, 4, frac);
+          boundaryValue += mur2ndOrder(gid_i, 4, frac, frac2, 0, 2);
           boundaryCount += 1;
         }
 
@@ -698,7 +718,8 @@ async function main() {
     gui.io.fps(fps);
     gui.io.jsTime(jsTime);
     gui.io.frameTime(deltaTime);
-    gui.io.computeTime((waveComputeTime + boundaryComputeTime));
+    gui.io.computeTime(waveComputeTime);
+    gui.io.boundaryTime(boundaryComputeTime);
     gui.io.renderTime(renderTime);
   }, 100);
 

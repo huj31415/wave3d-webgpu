@@ -159,6 +159,7 @@ gui.addNumericOutput("fps", "FPS", "", 1, "perfL");
 gui.addNumericOutput("frameTime", "Frame", "ms", 2, "perfL");
 gui.addNumericOutput("jsTime", "JS", "ms", 2, "perfL");
 gui.addNumericOutput("computeTime", "Compute", "ms", 2, "perfR");
+gui.addNumericOutput("boundaryTime", "Boundary", "ms", 2, "perfR");
 gui.addNumericOutput("renderTime", "Render", "ms", 2, "perfR");
 
 // Camera state section
