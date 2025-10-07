@@ -182,7 +182,8 @@ class GUI {
 
     let valueSpan = document.createElement("span");
     valueSpan.id = id + "Value";
-    valueSpan.innerText = params.float == 0 ? parseInt(params.val) : parseFloat(params.val).toFixed(params.float);
+    const updateValueSpan = (value) => valueSpan.innerText = params.float == 0 ? parseInt(value) : parseFloat(value).toFixed(params.float);
+    updateValueSpan(params.val);
 
     if (range) labelEl.appendChild(valueSpan);
 
@@ -194,7 +195,7 @@ class GUI {
     this.io[id] = input;
 
     input.addEventListener("input", () => {
-      if (range) valueSpan.innerText = params.float == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(params.float);
+      if (range) updateValueSpan(input.value);
       if (oninput) oninput((params.float == 0 ? parseInt : parseFloat)(input.value));
     });
 
@@ -202,8 +203,8 @@ class GUI {
       range = !range;
       input.type = range ? "range" : "number";
       labelEl.textContent = range ? `${label}: ` : label;
-      valueSpan.innerText = params.float == 0 ? parseInt(params.val) : parseFloat(params.val).toFixed(params.float);
       if (range) labelEl.appendChild(valueSpan);
+      updateValueSpan(input.value);
     })
   }
 
