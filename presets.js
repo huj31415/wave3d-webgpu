@@ -15,6 +15,7 @@ const presetSettings = {
   Vortex: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 1, autoThickness: true },
   PowerLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, thickness: 16, n: 2, autoThickness: false, invert: false },
   CircularLens: { radius: commonInitValues.radius, thickness: 16, f: 192, autoThickness: false, invert: false },
+  Prism: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 3, rot: 0 },
 }
 
 /**
@@ -173,15 +174,15 @@ function createLens(preset, convex = true, distance = 64, args = presetSettings.
   updateSpeedTexture();
 }
 
-function nGonPrism(distance = 96, n = 3, radius = 48, rot = Math.PI/5, refractiveIndex = 1.3) {
-  const sectorAngle = Math.PI / n;
-  const num = Math.cos(sectorAngle) * radius;
+function nGonPrism(distance = 96, args = presetSettings.Prism) {
+  const sectorAngle = Math.PI / args.n;
+  const num = Math.cos(sectorAngle) * args.radius;
   
   for (let z = 0; z < simulationDomain[2]; z++) {
-    for (let y = -radius; y < radius; y++) {
-      for (let x = -radius; x < radius; x++) {
-        if (Math.hypot(y, x) <= num / Math.cos(mod(Math.atan2(y, x) - rot, 2 * sectorAngle) - sectorAngle)) {
-          waveSpeedData[index3d(x + distance, y + yMidpt, z)] = 1 / refractiveIndex;
+    for (let y = -args.radius; y < args.radius; y++) {
+      for (let x = -args.radius; x < args.radius; x++) {
+        if (Math.hypot(y, x) <= num / Math.cos(mod(Math.atan2(y, x) + args.rot, 2 * sectorAngle) - sectorAngle)) {
+          waveSpeedData[index3d(x + distance + args.radius, y + yMidpt, z)] = 1 / args.refractiveIndex;
         }
       }
     }
