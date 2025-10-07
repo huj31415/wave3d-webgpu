@@ -85,13 +85,17 @@ span.halfWidth {
   /* border: 1px solid #d8d7d5; */
 }
 
+.warn {
+  color: rgb(255, 64, 64);
+}
+
 div.right-dark {
   padding: 15px;
   position: absolute;
   right: 0px;
   /*15px*/
   top: 0px;
-  width: 315px;
+  width: 320px;
   height: 100%;
   overflow: scroll;
   background: rgba(255, 255, 255, .7);

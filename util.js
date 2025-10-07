@@ -22,6 +22,8 @@ uni.addUniform("intensityMult", "f32");   // intensity rendering multiplier
 uni.addUniform("waveSourceType", "f32");  // source type: 0=plane, 1=point
 uni.addUniform("globalAlpha", "f32");     // global alpha multiplier
 uni.addUniform("plusXAlpha", "f32");      // +x face alpha multiplier
+uni.addUniform("wavePos", "vec3f");       // Wave beam/point center position
+uni.addUniform("waveHalfSize", "vec2f");  // Wave beam size in Y and Z
 uni.finalize();
 
 const textures = {
@@ -67,6 +69,9 @@ const simulationDomainNorm = simulationDomain.map(v => v / Math.max(...simulatio
 let waveSpeedData = new Float32Array(simulationDomain[0] * simulationDomain[1] * simulationDomain[2]).fill(1);
 
 let cleared = false;
+
+const wavePos = [0, yMidpt, zMidpt];
+const waveHalfSize = [36, 36];
 
 /**
  * Resizes the simulation domain
@@ -172,18 +177,39 @@ gui.addNDimensionalOutput(["camAlt", "camAz"], "Alt/az", "°", ", ", 2, "camStat
 
 // Sim controls
 gui.addGroup("simCtrl", "Sim controls");
-gui.addNumericInput("dt", true, "dt (reinit)", 0, 1, 0.01, dt, 2, "simCtrl", (newDt) => {
+gui.addNumericInput("dt", true, "dt (reinit)", { min: 0, max: 1, step: 0.01, val: dt, float: 2 }, "simCtrl", (newDt) => {
   if (oldDt) oldDt = newDt;
   else dt = newDt;
 }, "Simulation delta-time; must meet the CFL condition for stability; requires reinitialization to apply");
-gui.addNumericInput("xSize", false, "X size (reinit)", 8, 1024, 8, simulationDomain[0], 0, "simCtrl", (value) => newDomainSize[0] = value, "Requires reinitialization to apply");
-gui.addNumericInput("ySize", false, "Y size (reinit)", 8, 512, 8, simulationDomain[1], 0, "simCtrl", (value) => newDomainSize[1] = value, "Requires reinitialization to apply");
-gui.addNumericInput("zSize", false, "Z size (reinit)", 8, 512, 8, simulationDomain[2], 0, "simCtrl", (value) => newDomainSize[2] = value, "Requires reinitialization to apply");
-gui.addNumericInput("wavelength", true, "Wavelength", 4, 100, 0.1, 6, 1, "simCtrl", (value) => waveSettings.wavelength = value );
-gui.addNumericInput("amp", true, "Amplitude", 0.1, 5, 0.1, 1, 1, "simCtrl", (value) => { waveSettings.amp = value; });
+gui.addNumericInput("xSize", false, "X size (reinit)", { min: 8, max: 1024, step: 8, val: simulationDomain[0], float: 0 }, "simCtrl", (value) => newDomainSize[0] = value, "Requires reinitialization to apply");
+gui.addNumericInput("ySize", false, "Y size (reinit)", { min: 8, max: 512, step: 8, val: simulationDomain[1], float: 0 }, "simCtrl", (value) => newDomainSize[1] = value, "Requires reinitialization to apply");
+gui.addNumericInput("zSize", false, "Z size (reinit)", { min: 8, max: 512, step: 8, val: simulationDomain[2], float: 0 }, "simCtrl", (value) => newDomainSize[2] = value, "Requires reinitialization to apply");
+gui.addNumericInput("wavelength", true, "Wavelength", { min: 4, max: 100, step: 0.1, val: 6, float: 1 }, "simCtrl", (value) => waveSettings.wavelength = value );
+gui.addNumericInput("amp", true, "Amplitude", { min: 0.1, max: 5, step: 0.1, val: 1, float: 1 }, "simCtrl", (value) => { waveSettings.amp = value; });
 gui.addHalfWidthGroups("waveformOptions", "sourceTypeOptions", "simCtrl");
 gui.addRadioOptions("waveform", ["sine", "square", "triangle", "sawtooth"], "sine", "waveformOptions", {}, (value) => waveSettings.waveform = waveformOptions[value]);
-gui.addRadioOptions("sourceType", ["plane", "point"], "plane", "sourceTypeOptions", {}, (value) => uni.values.waveSourceType.set([value === "plane" ? 0 : 1]));
+gui.addNumericInput("wavePX", true, "X pos", { min: 0, max: 1024, step: 16, val: 0, float: 0 }, "simCtrl", (value) => {
+  wavePos[0] = value;
+  uni.values.wavePos.set(wavePos);
+}, "Wave source X-coordinate");
+gui.addNumericInput("wavePY", true, "Y pos", { min: 0, max: 1, step: 0.01, val: 0.5, float: 2 }, "simCtrl", (value) => {
+  wavePos[1] = Math.round(value * simulationDomain[1]);
+  uni.values.wavePos.set(wavePos);
+}, "Wave source Y-coordinate normalized to sim domain");
+gui.addNumericInput("wavePZ", true, "Z pos", { min: 0, max: 1, step: 0.01, val: 0.5, float: 2 }, "simCtrl", (value) => {
+  wavePos[2] = Math.round(value * simulationDomain[2]);
+  uni.values.wavePos.set(wavePos);
+}, "Wave source Z-coordinate normalized to sim domain");
+gui.addNumericInput("waveSY", true, "Y size", { min: 8, max: 256, step: 1, val: 36, float: 0 }, "simCtrl", (value) => {
+  waveHalfSize[0] = value / 2;
+  uni.values.waveHalfSize.set(waveHalfSize);
+}, "Wave source Y size on the simulation YZ plane");
+gui.addNumericInput("waveSZ", true, "Z size", { min: 8, max: 256, step: 1, val: 36, float: 0 }, "simCtrl", (value) => { waveHalfSize[1] = value / 2; uni.values.waveHalfSize.set(waveHalfSize); }, "Wave source Z size on the simulation YZ plane");
+gui.addRadioOptions("sourceType", ["plane", "beam", "point"], "plane", "sourceTypeOptions", {
+  plane: [],
+  beam: ["wavePY", "wavePZ", "waveSY", "waveSZ"],
+  point: ["wavePX", "wavePY", "wavePZ"],
+}, (value) => uni.values.waveSourceType.set([value === "plane"? 0 : value === "beam" ? 1 : 2]));
 gui.addButton("waveOn", "Toggle wave generator", true, "simCtrl", () => {
   waveOn = !waveOn;
   if (waveOn) {
@@ -210,42 +236,42 @@ gui.addGroup("presets", "Presets");
 
 gui.addRadioOptions("shape", ["circular", "square", "linear"], "circular", "presets", {}, (value) => presetSettings.Aperture.shape = presetSettings.ZonePlate.shape = shapes[value]);
 
-gui.addNumericInput("f", true, "Focal length", 4, 512, 1, 192, 0, "presets", (value) => presetSettings.ZonePlate.f = value);
-gui.addNumericInput("nCutouts", true, "# Cutouts", 1, 20, 1, 4, 0, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
+gui.addNumericInput("f", true, "Focal length", { min: 4, max: 512, step: 1, val: 192, float: 0 }, "presets", (value) => presetSettings.ZonePlate.f = presetSettings.CircularLens.f = value);
+gui.addNumericInput("nCutouts", true, "# Cutouts", { min: 1, max: 20, step: 1, val: 4, float: 0 }, "presets", (value) => presetSettings.ZonePlate.nCutouts = value);
 
-gui.addNumericInput("slitWidth", true, "Slit width", 3, 512, 1, 8, 0, "presets", (value) => presetSettings.DoubleSlit.slitWidth = value);
-gui.addNumericInput("slitSpacing", true, "Slit spacing", 0, 512, 1, 32, 0, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
-gui.addNumericInput("slitHeight", true, "Slit height", 0, 512, 1, 64, 0, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
+gui.addNumericInput("slitWidth", true, "Slit width", { min: 3, max: 512, step: 1, val: 8, float: 0 }, "presets", (value) => presetSettings.DoubleSlit.slitWidth = value);
+gui.addNumericInput("slitSpacing", true, "Slit spacing", { min: 0, max: 512, step: 1, val: 32, float: 0 }, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
+gui.addNumericInput("slitHeight", true, "Slit height", { min: 0, max: 512, step: 1, val: 64, float: 0 }, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
 
-gui.addNumericInput("radius", true, "Radius", 0, 256, 1, commonInitValues.radius, 0, "presets", (value) =>
+gui.addNumericInput("radius", true, "Radius", { min: 0, max: 256, step: 1, val: commonInitValues.radius, float: 0 }, "presets", (value) =>
   presetSettings.Aperture.radius = presetSettings.Lens.radius = presetSettings.Vortex.radius = presetSettings.CircularLens.radius = presetSettings.PowerLens.radius = value
 );
 
 gui.addCheckbox("invert", "Invert barrier", false, "presets", (checked) => presetSettings.Aperture.invert = checked);
 
 gui.addRadioOptions("lensType", ["elliptical", "parabolic"], "parabolic", "presets");
-gui.addNumericInput("lensThickness", true, "Thickness", 4, 100, 1, 16, 0, "presets", (value) =>
+gui.addNumericInput("lensThickness", true, "Thickness", { min: 4, max: 100, step: 1, val: 16, float: 0 }, "presets", (value) =>
   presetSettings.Lens.thickness = presetSettings.CircularLens.thickness = presetSettings.PowerLens.thickness = value
 );
-gui.addNumericInput("refractiveIndex", false, "Refractive index", 0.5, 2, 0.01, commonInitValues.refractiveIndex, 2, "presets", (value) =>
-  presetSettings.Lens.refractiveIndex = presetSettings.Vortex.refractiveIndex = presetSettings.PowerLens.refractiveIndex = presetSettings.CircularLens.refractiveIndex = value
+gui.addNumericInput("refractiveIndex", false, "Refractive index", { min: 0.5, max: 2, step: 0.01, val: commonInitValues.refractiveIndex, float: 2 }, "presets", (value) =>
+  presetSettings.Lens.refractiveIndex = presetSettings.Vortex.refractiveIndex = presetSettings.PowerLens.refractiveIndex = value
 );
-gui.addNumericInput("halfLens", true, "Half lens", -1, 1, 1, 0, 0, "presets", (value) => presetSettings.Lens.half = value, "-1: curved toward source, 0: both halves, 1: flat toward source");
+gui.addNumericInput("halfLens", true, "Half lens", { min: -1, max: 1, step: 1, val: 0, float: 0 }, "presets", (value) => presetSettings.Lens.half = value, "-1: curved toward source, 0: both halves, 1: flat toward source");
 gui.addCheckbox("outerBarrier", "Outer barrier", true, "presets", (checked) => presetSettings.Lens.outerBarrier = checked);
 
 
-gui.addNumericInput("barrierThickness", true, "Thickness", 1, 16, 1, 2, 0, "presets", (value) => presetThickness = value);
-gui.addNumericInput("xOffset", true, "X Offset", 0, 512, 1, 16, 0, "presets", (value) => presetXOffset = value);
+gui.addNumericInput("barrierThickness", true, "Thickness", { min: 1, max: 16, step: 1, val: 2, float: 0 }, "presets", (value) => presetThickness = value);
+gui.addNumericInput("xOffset", true, "X Offset", { min: 0, max: 512, step: 1, val: 16, float: 0 }, "presets", (value) => presetXOffset = value);
 
 gui.addGroup("phasePlateOptions-container", null, null, "presets");
-gui.addNumericInput("nVortices", true, "n vortices", -4, 4, 1, 1, 0, "phasePlateOptions-container", (value) => presetSettings.Vortex.n = value);
-gui.addNumericInput("exp", true, "exp", 0, 5, 0.1, 2, 1, "phasePlateOptions-container", (value) => presetSettings.PowerLens.n = value);
+gui.addNumericInput("nVortices", true, "n vortices", { min: -4, max: 4, step: 1, val: 1, float: 0 }, "phasePlateOptions-container", (value) => presetSettings.Vortex.n = value);
+gui.addNumericInput("exp", true, "exp", { min: 0, max: 5, step: 0.1, val: 2, float: 1 }, "phasePlateOptions-container", (value) => presetSettings.PowerLens.n = value);
 gui.addCheckbox("invertLens", "Invert lens", false, "phasePlateOptions-container", (checked) => presetSettings.PowerLens.invert = presetSettings.CircularLens.invert = checked);
 
 gui.addRadioOptions("phasePlateType", ["Vortex", "PowerLens", "CircularLens"], "Vortex", "phasePlateOptions-container", {
   "Vortex": ["nVortices"],
   "PowerLens": ["exp", "invertLens"],
-  "CircularLens": ["invertLens"],
+  "CircularLens": ["f", "invertLens"],
 });
 
 gui.addDropdown("presetSelect", "Select preset", ["ZonePlate", "DoubleSlit", "Aperture", "Lens", "PhasePlate"], "presets", {
@@ -262,15 +288,15 @@ gui.addButton("clearPreset", "Clear", true, "presets", () => updateSpeedTexture(
 
 // Visualization controls
 gui.addGroup("visCtrl", "Visualization controls");
-gui.addNumericInput("globalAlpha", true, "Global alpha", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.values.globalAlpha.set([value]), "Global alpha multiplier");
-gui.addNumericInput("rayDtMult", true, "Ray dt mult", 0.1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.values.rayDtMult.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
+gui.addNumericInput("globalAlpha", true, "Global alpha", { min: 0.1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.globalAlpha.set([value]), "Global alpha multiplier");
+gui.addNumericInput("rayDtMult", true, "Ray dt mult", { min: 0.1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.rayDtMult.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
 gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
   intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
   uni.values.intensityFilter.set([intensityFilterStrength]);
 });
-gui.addNumericInput("plusXAlpha", true, "+X intensity a", 1, 5, 0.1, 2, 1, "visCtrl", (value) => uni.values.plusXAlpha.set([value]), "+X intensity projection alpha multiplier");
-gui.addNumericInput("intensityMult", true, "Intensity mult", 0.01, 5, 0.01, 1, 2, "visCtrl", (value) => uni.values.intensityMult.set([value]), "Raw intensity value multiplier before transfer function");
-gui.addNumericInput("intensityFilter", true, "Intensity filter", 0, 3, 0.1, 2, 1, "visCtrl", (value) => {
+gui.addNumericInput("plusXAlpha", true, "+X intensity a", { min: 1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.plusXAlpha.set([value]), "+X intensity projection alpha multiplier");
+gui.addNumericInput("intensityMult", true, "Intensity mult", { min: 0.01, max: 5, step: 0.01, val: 1, float: 2 }, "visCtrl", (value) => uni.values.intensityMult.set([value]), "Raw intensity value multiplier before transfer function");
+gui.addNumericInput("intensityFilter", true, "Intensity filter", { min: 0, max: 3, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => {
   value = Math.pow(10, value);
   defaultIntensityFilterStrength = value;
   intensityFilterStrength = gui.io.intensity.checked ? defaultIntensityFilterStrength : 0;
@@ -297,7 +323,7 @@ gui.addGroup("camKeybinds", "Camera controls", `
 `);
 
 // Extra info
-gui.addGroup("extraInfo", null, `
+gui.addGroup("guiControls", "GUI controls", `
   <div>
     Click on section titles to expand/collapse
     <br>

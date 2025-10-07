@@ -18,7 +18,7 @@ const defaults = {
   elevation: 0,
   fov: (60).toRad(),
   near: 0.1,
-  far: 1e3,
+  far: 1e2,
 }
 
 // camera state and interaction

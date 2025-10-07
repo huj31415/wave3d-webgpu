@@ -13,8 +13,8 @@ const presetSettings = {
   ZonePlate: { shape: shapes.circular, f: 192, nCutouts: 4 },
   Lens: { thickness: 16, radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, half: 0, outerBarrier: true },
   Vortex: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 1, autoThickness: true },
-  PowerLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, n: 2, autoThickness: false, invert: false },
-  CircularLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, autoThickness: false, invert: false },
+  PowerLens: { radius: commonInitValues.radius, refractiveIndex: commonInitValues.refractiveIndex, thickness: 16, n: 2, autoThickness: false, invert: false },
+  CircularLens: { radius: commonInitValues.radius, thickness: 16, f: 192, autoThickness: false, invert: false },
 }
 
 /**
@@ -73,6 +73,7 @@ const flatPresets = Object.freeze({
   },
 });
 
+// extra path length = (n - n0) * thickness
 const phasePlatePresets = Object.freeze({
   Vortex: (y, z, args = presetSettings.Vortex) => { // n is nonzero integer
     const n = Math.PI / args.n;
@@ -85,11 +86,15 @@ const phasePlatePresets = Object.freeze({
     return args.invert ? 1 + (1 / args.refractiveIndex) - a : a;
   },
   CircularLens: (y, z, args = presetSettings.CircularLens) => {
-    const rNorm = Math.hypot(y, z) / (args.radius);
-    const t = 1 + 1 / (2 * args.refractiveIndex * (args.refractiveIndex - 1));
-    const a = t - Math.sqrt(t * t - rNorm * rNorm);
-    return args.invert ? 1 - a : (1 / args.refractiveIndex + a);
-    // return 1 / (Math.sqrt(1 - rNorm*rNorm) * (args.refractiveIndex - 1) + 1);
+    // const rNorm = Math.hypot(y, z) / (args.radius);
+    // const t = 1 + 1 / (2 * args.refractiveIndex * (args.refractiveIndex - 1));
+    // const a = t - Math.sqrt(t * t - rNorm * rNorm);
+    // return args.invert ? 1 - a : (1 / args.refractiveIndex + a);
+    // // return 1 / (Math.sqrt(1 - rNorm*rNorm) * (args.refractiveIndex - 1) + 1);
+    const opl = (Math.sqrt(args.f * args.f + (y * y + z * z)) - args.f) / args.thickness;
+    const maxOpl = (Math.sqrt(args.f * args.f + args.radius * args.radius) - args.f) / args.thickness;
+    // return 1 / (1 + (args.invert ? -1 : 1) * opl);
+    return 1 / (args.invert ? 1 + opl : maxOpl + 1 - opl);
   }
 });
 
@@ -162,6 +167,22 @@ function createLens(preset, convex = true, distance = 64, args = presetSettings.
         // write half-lenses
         if (args.half >= 0) updateQuadSymmetry(distance + x - offset, y, z, newSpeed);
         if (args.half <= 0) updateQuadSymmetry(distance - x + offset, y, z, newSpeed);
+      }
+    }
+  }
+  updateSpeedTexture();
+}
+
+function nGonPrism(distance = 96, n = 3, radius = 48, rot = Math.PI/5, refractiveIndex = 1.3) {
+  const sectorAngle = Math.PI / n;
+  const num = Math.cos(sectorAngle) * radius;
+  
+  for (let z = 0; z < simulationDomain[2]; z++) {
+    for (let y = -radius; y < radius; y++) {
+      for (let x = -radius; x < radius; x++) {
+        if (Math.hypot(y, x) <= num / Math.cos(mod(Math.atan2(y, x) - rot, 2 * sectorAngle) - sectorAngle)) {
+          waveSpeedData[index3d(x + distance, y + yMidpt, z)] = 1 / refractiveIndex;
+        }
       }
     }
   }

@@ -154,26 +154,26 @@ class GUI {
    * @param {String} id id of the input. A container div is created with id `${id}-container`
    * @param {Boolean} range Whether to use a range input or a plain number input
    * @param {String} label Label of the input, a colon and the value will be added if range is true
-   * @param {Number} min Min value
-   * @param {Number} max Max value
-   * @param {Number} step Step size
-   * @param {Number} value Value at initialization
-   * @param {Number} floatPrecision Precision of the output display
+   * @param {Number} params.min Min value
+   * @param {Number} params.max Max value
+   * @param {Number} params.step Step size
+   * @param {Number} params.val Value at initialization
+   * @param {Number} params.float Precision of the output display
    * @param {String} group id of the group to add this under
    * @param {Function} oninput Callback function of the new value to run on user input
    * @param {String} title Description as a tooltip
    */
-  addNumericInput(id, range = true, label, min, max, step, value = (min + max) / 2, floatPrecision = 2, group = "parent", oninput, title) {
+  addNumericInput(id, range = true, label, params = { min, max, step, val, float }, group = "parent", oninput, title) {
     const container = document.createElement("div");
     container.id = `${id}-container`;
 
     const input = document.createElement("input");
     input.type = range ? "range" : "number";
     input.id = id;
-    input.min = min;
-    input.max = max;
-    input.step = step;
-    input.value = value;
+    input.min = params.min;
+    input.max = params.max;
+    input.step = params.step;
+    input.value = params.val;
 
     const labelEl = document.createElement("label");
     labelEl.setAttribute("for", id);
@@ -182,7 +182,7 @@ class GUI {
 
     let valueSpan = document.createElement("span");
     valueSpan.id = id + "Value";
-    valueSpan.innerText = floatPrecision == 0 ? parseInt(value) : parseFloat(value).toFixed(floatPrecision);
+    valueSpan.innerText = params.float == 0 ? parseInt(params.val) : parseFloat(params.val).toFixed(params.float);
 
     if (range) labelEl.appendChild(valueSpan);
 
@@ -194,15 +194,15 @@ class GUI {
     this.io[id] = input;
 
     input.addEventListener("input", () => {
-      if (range) valueSpan.innerText = floatPrecision == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(floatPrecision);
-      if (oninput) oninput((floatPrecision == 0 ? parseInt : parseFloat)(input.value));
+      if (range) valueSpan.innerText = params.float == 0 ? parseInt(input.value) : parseFloat(input.value).toFixed(params.float);
+      if (oninput) oninput((params.float == 0 ? parseInt : parseFloat)(input.value));
     });
 
     labelEl.addEventListener("click", () => {
       range = !range;
       input.type = range ? "range" : "number";
       labelEl.textContent = range ? `${label}: ` : label;
-      valueSpan.innerText = floatPrecision == 0 ? parseInt(value) : parseFloat(value).toFixed(floatPrecision);
+      valueSpan.innerText = params.float == 0 ? parseInt(params.val) : parseFloat(params.val).toFixed(params.float);
       if (range) labelEl.appendChild(valueSpan);
     })
   }

@@ -1,5 +1,5 @@
 let adapter, device;
-
+let gpuInfo = false;
 
 async function main() {
 
@@ -14,6 +14,21 @@ async function main() {
   maxComputeInvocationsPerWorkgroup = adapter.limits.maxComputeInvocationsPerWorkgroup;
   maxBufferSize = adapter.limits.maxBufferSize;
   f32filterable = adapter.features.has("float32-filterable");
+
+  // compute workgroup size 16*8*8 | 32*8*4 | 64*4*4 = 1024 threads if maxComputeInvocationsPerWorkgroup >= 1024, otherwise 16*4*4 = 256 threads
+  const largeWg = maxComputeInvocationsPerWorkgroup >= 1024;
+  const [wg_x, wg_y, wg_z] = largeWg ? [16, 8, 8] : [16, 4, 4];
+
+  if (!gpuInfo) {
+    gui.addGroup("deviceInfo", "Device info", `
+<pre><span ${!largeWg ? "class='warn'" : ""}>maxComputeInvocationsPerWorkgroup: ${maxComputeInvocationsPerWorkgroup}
+workgroup: [${wg_x}, ${wg_y}, ${wg_z}]</span>
+maxBufferSize: ${maxBufferSize}
+f32filterable: ${f32filterable}
+</pre>
+  `);
+    gpuInfo = true;
+  }
 
   device = await adapter?.requestDevice({
     requiredFeatures: [
@@ -91,11 +106,9 @@ async function main() {
 
   const uniformBuffer = uni.createBuffer(device);
 
-  // compute workgroup size 16*8*8 | 32*8*4 | 64*4*4 = 1024 threads if maxComputeInvocationsPerWorkgroup >= 1024, otherwise 16*4*4 = 256 threads
-  const [wg_x, wg_y, wg_z] = maxComputeInvocationsPerWorkgroup >= 1024 ? [16, 8, 8] : [16, 4, 4];
 
   const waveComputeModule = device.createShaderModule({
-    code: `
+    code: /* wgsl */`
       ${uni.uniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -143,6 +156,7 @@ async function main() {
       //   vec3i( 1,  1, -1), // xpypzn
       //   vec3i( 1,  1,  1), // xpypzp
       // );
+
       const directions: array<vec3i, 6> = array<vec3i, 6>(
         // 00-05 orthogonal directions (cubic faces)
         vec3i(-1,  0,  0), // xn
@@ -154,20 +168,24 @@ async function main() {
       );
 
 
-      // var<workgroup> presentTile: array<f32, (WG_X + 2) * (WG_Y + 2) * (WG_Z + 2)>;
+      // var<workgroup> tile: array<f32, (WG_X + 2) * (WG_Y + 2) * (WG_Z + 2)>;
 
-      // fn localTileIndex(idx: vec3u) -> u32 {
-      //   return idx.x + (WG_X + 2u) * (idx.y + (WG_Y + 2u) * idx.z);
+      // fn tileIndex(idx: vec3i) -> u32 {
+      //   let sidx = vec3u(idx + vec3i(1)); // shift by 1 to account for halo
+      //   return sidx.x + (WG_X + 2u) * (sidx.y + (WG_Y + 2u) * sidx.z);
       // }
 
       // 3d wave compute shader
       @compute @workgroup_size(WG_X, WG_Y, WG_Z)
       fn main(
-        @builtin(global_invocation_id) gid: vec3u
+        @builtin(global_invocation_id) gid: vec3u,
+        @builtin(local_invocation_id) lid: vec3u
       ) {
+        // var earlyReturn = false;
 
         let volSize = vec3u(uni.volSize);
         let gid_i = vec3i(gid);
+        // let lid_i = vec3i(lid);
 
         // check if the index is within bounds
         if (any(gid >= volSize)) { return; }
@@ -178,18 +196,20 @@ async function main() {
           textureStore(past_future, gid, vec4f(0));
           textureStore(intensity, gid, vec4f(0));
           return;
+          // earlyReturn = true;
         }
 
         // wave
         if (uni.waveOn > 0) {
-          let isPlane = uni.waveSourceType == 0;
-          let applyWave = (isPlane && gid.x == 0) || (!isPlane && all(gid == vec3u(8, volSize.y / 2, volSize.z / 2)));
-
           // write wave source to texture
-          if (applyWave) {
+          if ((uni.waveSourceType == 0 && gid.x == 0)
+            || (uni.waveSourceType == 1 && gid.x == 0 && all(abs(gid_i.yz - vec2i(uni.wavePos.yz)) <= vec2i(uni.waveHalfSize)))
+            || (uni.waveSourceType == 2 && all(gid == vec3u(uni.wavePos)))
+          ) {
             // write to the past/future texture
-            textureStore(past_future, gid, vec4f(uni.waveValue, 0.0, 0.0, 0.0) * select(200.0, 1.0, isPlane));
+            textureStore(past_future, gid, vec4f(uni.waveValue, 0.0, 0.0, 0.0) * select(200.0, 1.0, uni.waveSourceType <= 1));
             return;
+            // earlyReturn = true;
           }
         }
 
@@ -205,6 +225,45 @@ async function main() {
           + textureLoad(present, gid_i + directions[4]).r
           + textureLoad(present, gid_i + directions[5]).r;
 
+        // tile[tileIndex(lid_i)] = presentValue;
+        // // load halo
+        // if (lid.x == 0 || lid.x == WG_X - 1u) {
+        //   let dir = select(directions[1], directions[0], lid.x == 0);
+        //   tile[tileIndex(lid_i + dir)] = textureLoad(present, gid_i + dir).r;
+        // //   tile[tileIndex(lid_i + directions[0])] = textureLoad(present, gid_i + directions[0]).r;
+        // // } else if (lid.x == WG_X - 1u) {
+        // //   tile[tileIndex(lid_i + directions[1])] = textureLoad(present, gid_i + directions[1]).r;
+        // }
+
+        // if (lid.y == 0 || lid.y == WG_Y - 1u) {
+        //   let dir = select(directions[3], directions[2], lid.y == 0);
+        //   tile[tileIndex(lid_i + dir)] = textureLoad(present, gid_i + dir).r;
+        // //   tile[tileIndex(lid_i + directions[2])] = textureLoad(present, gid_i + directions[2]).r;
+        // // } else if (lid.y == WG_Y - 1u) {
+        // //   tile[tileIndex(lid_i + directions[3])] = textureLoad(present, gid_i + directions[3]).r;
+        // }
+
+        // if (lid.z == 0 || lid.z == WG_Z - 1u) {
+        //   let dir = select(directions[5], directions[4], lid.z == 0);
+        //   tile[tileIndex(lid_i + dir)] = textureLoad(present, gid_i + dir).r;
+        // //   tile[tileIndex(lid_i + directions[4])] = textureLoad(present, gid_i + directions[4]).r;
+        // // } else if (lid.z == WG_Z - 1u) {
+        // //   tile[tileIndex(lid_i + directions[5])] = textureLoad(present, gid_i + directions[5]).r;
+        // }
+
+        // workgroupBarrier();
+
+        // if (earlyReturn) { return; };
+
+        // let laplacian = -6.0 * presentValue
+        //    + tile[tileIndex(lid_i + directions[0])]
+        //    + tile[tileIndex(lid_i + directions[1])]
+        //    + tile[tileIndex(lid_i + directions[2])]
+        //    + tile[tileIndex(lid_i + directions[3])]
+        //    + tile[tileIndex(lid_i + directions[4])]
+        //    + tile[tileIndex(lid_i + directions[5])];
+
+        // 26 point stencil
         // var laplacian = -88.0 * presentValue;
 
         // for (var i = 0; i < 6; i++) {
@@ -254,7 +313,7 @@ async function main() {
   });
 
   const boundaryComputeModule = device.createShaderModule({
-    code: `
+    code: /* wgsl */`
       ${uni.uniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -292,7 +351,7 @@ async function main() {
           );
       }
 
-      // 3d wave compute shader
+      // 3d wave boundary compute shader
       @compute @workgroup_size(WG_X, WG_Y, WG_Z)
       fn main(
         @builtin(global_invocation_id) gid: vec3u
@@ -389,7 +448,7 @@ async function main() {
   });
 
   const renderModule = device.createShaderModule({
-    code: `
+    code: /* wgsl */`
       ${uni.uniformStruct}
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -525,12 +584,13 @@ async function main() {
           var sampleColor = clamp(vec4f(sampleValue, (abs(sampleValue) - 1) * 0.5, -sampleValue, a), vec4f(0), vec4f(1)) * 10;
 
           // Slight opacity to refractive materials
-          sampleColor += f32(speed != 1.0) * vec4f(min(abs(1.0 - speed), 0.05) * 10.0);
+          sampleColor += f32(speed != 1.0) * vec4f(min(abs(1.0 - speed), 0.05) * 6);
 
           // +X face emphasis
           if (renderIntensity && samplePos.x >= plusXLimit) {
             sampleColor.a *= uni.plusXAlpha;
           }
+          // sampleColor.a *= 1 + f32(renderIntensity && samplePos.x >= plusXLimit) * (uni.plusXAlpha - 1);
 
           // Exponential blending
           color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
@@ -736,6 +796,8 @@ async function main() {
   uni.values.waveSourceType.set([0]);
   uni.values.globalAlpha.set([2]);
   uni.values.plusXAlpha.set([2]);
+  uni.values.wavePos.set(wavePos);
+  uni.values.waveHalfSize.set(waveHalfSize);
   time = 0;
 
   rafId = requestAnimationFrame(render);
@@ -743,4 +805,5 @@ async function main() {
 
 const camera = new Camera(defaults);
 
-main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, presetThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
+// main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, presetThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
+main().then(() => nGonPrism());
