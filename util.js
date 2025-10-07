@@ -57,6 +57,12 @@ const waveSettings = {
   amp: 1
 }
 
+const sharedSettings = {
+  radius: 64,
+  refractiveIndex: 1.5,
+  thickness: 16,
+};
+
 // simulation domain size [x, y, z], ex. [384, 256, 256], [512, 256, 384]
 const simulationDomain = [384, 256, 256];//[768, 384, 384];
 let newDomainSize = vec3.clone(simulationDomain);
@@ -97,7 +103,7 @@ function refreshPreset(clear = false) {
     case "DoubleSlit":
     case "Aperture":
     case "ZonePlate":
-      quadSymmetricFlatPreset(flatPresets[presetType], presetXOffset, presetThickness, presetSettings[presetType]);
+      quadSymmetricFlatPreset(flatPresets[presetType], presetXOffset, barrierThickness, presetSettings[presetType]);
       break;
     case "Lens":
       createLens(lensPresets[gui.io.lensType()], true, presetXOffset, presetSettings.Lens);
@@ -151,11 +157,6 @@ function hardReset() {
 
 
 const canvas = document.getElementById("canvas");
-
-const commonInitValues = {
-  radius: 64,
-  refractiveIndex: 1.5,
-}
 
 const gui = new GUI("3D wave sim on WebGPU", canvas);
 
@@ -253,24 +254,20 @@ const gui = new GUI("3D wave sim on WebGPU", canvas);
   gui.addNumericInput("slitSpacing", true, "Slit spacing", { min: 0, max: 512, step: 1, val: 32, float: 0 }, "presets", (value) => presetSettings.DoubleSlit.slitSpacing = value);
   gui.addNumericInput("slitHeight", true, "Slit height", { min: 0, max: 512, step: 1, val: 64, float: 0 }, "presets", (value) => presetSettings.DoubleSlit.slitHeight = value);
 
-  gui.addNumericInput("radius", true, "Radius", { min: 0, max: 256, step: 1, val: commonInitValues.radius, float: 0 }, "presets", (value) =>
-    presetSettings.Aperture.radius = presetSettings.Lens.radius = presetSettings.Vortex.radius = presetSettings.CircularLens.radius = presetSettings.PowerLens.radius = presetSettings.Prism.radius = value
-  );
+  gui.addNumericInput("radius", true, "Radius", { min: 0, max: 256, step: 1, val: sharedSettings.radius, float: 0 }, "presets", (value) => sharedSettings.radius = value);
 
   gui.addCheckbox("invert", "Invert barrier", false, "presets", (checked) => presetSettings.Aperture.invert = checked);
 
   gui.addRadioOptions("lensType", ["elliptical", "parabolic"], "parabolic", "presets");
   gui.addNumericInput("lensThickness", true, "Thickness", { min: 4, max: 100, step: 1, val: 16, float: 0 }, "presets", (value) =>
-    presetSettings.Lens.thickness = presetSettings.CircularLens.thickness = presetSettings.PowerLens.thickness = value
+    sharedSettings.thickness = value
   );
-  gui.addNumericInput("refractiveIndex", false, "Refractive index", { min: 0.5, max: 2, step: 0.01, val: commonInitValues.refractiveIndex, float: 2 }, "presets", (value) =>
-    presetSettings.Lens.refractiveIndex = presetSettings.Vortex.refractiveIndex = presetSettings.PowerLens.refractiveIndex = presetSettings.Prism.refractiveIndex = value
-  );
+  gui.addNumericInput("refractiveIndex", false, "Refractive index", { min: 0.5, max: 2, step: 0.01, val: sharedSettings.refractiveIndex, float: 2 }, "presets", (value) => sharedSettings.refractiveIndex = value);
   gui.addNumericInput("halfLens", true, "Half lens", { min: -1, max: 1, step: 1, val: 0, float: 0 }, "presets", (value) => presetSettings.Lens.half = value, "-1: curved toward source, 0: both halves, 1: flat toward source");
   gui.addCheckbox("outerBarrier", "Outer barrier", true, "presets", (checked) => presetSettings.Lens.outerBarrier = checked);
 
 
-  gui.addNumericInput("barrierThickness", true, "Thickness", { min: 1, max: 16, step: 1, val: 2, float: 0 }, "presets", (value) => presetThickness = value);
+  gui.addNumericInput("barrierThickness", true, "Thickness", { min: 1, max: 16, step: 1, val: 2, float: 0 }, "presets", (value) => barrierThickness = value);
   gui.addNumericInput("xOffset", true, "X Offset", { min: 0, max: 512, step: 1, val: 16, float: 0 }, "presets", (value) => presetXOffset = value);
 
   gui.addGroup("phasePlateOptions-container", null, null, "presets");

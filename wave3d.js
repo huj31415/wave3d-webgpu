@@ -805,4 +805,4 @@ f32filterable: ${f32filterable}
 
 const camera = new Camera(defaults);
 
-main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, presetThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
+main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, barrierThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
