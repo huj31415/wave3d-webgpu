@@ -27,8 +27,8 @@ const presetSettings = {
  */
 function updateQuadSymmetry(x, yRel, zRel, newSpeed) {
   if (x < simulationDomain[0] && x >= 0
-    && Math.abs(yRel) < yMidpt
-    && Math.abs(zRel) < zMidpt
+    && Math.abs(yRel) <= yMidpt
+    && Math.abs(zRel) <= zMidpt
   )
     [
       index3d(x, yMidpt - yRel, zMidpt - zRel),
@@ -107,8 +107,8 @@ const phasePlatePresets = Object.freeze({
  * @param {Object} args Object containing the arguments for the selected preset
  */
 function quadSymmetricFlatPreset(preset, distance = 64, thickness = 2, args) {
-  for (let z = 0; z < zMidpt; z++) {
-    for (let y = 0; y < yMidpt; y++) {
+  for (let z = 0; z <= zMidpt; z++) {
+    for (let y = 0; y <= yMidpt; y++) {
       for (let x = distance; x < distance + thickness; x++) {
         updateQuadSymmetry(x, y, z, preset(y, z, args));
       }
