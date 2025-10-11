@@ -5,15 +5,15 @@ async function main() {
 
   if (device) device.destroy();
 
-  let maxComputeInvocationsPerWorkgroup, maxBufferSize, f32filterable;
+  // let maxComputeInvocationsPerWorkgroup, maxBufferSize, f32filterable;
 
   // WebGPU Setup
   // if (!device) {
   adapter = await navigator.gpu?.requestAdapter();
 
-  maxComputeInvocationsPerWorkgroup = adapter.limits.maxComputeInvocationsPerWorkgroup;
-  maxBufferSize = adapter.limits.maxBufferSize;
-  f32filterable = adapter.features.has("float32-filterable");
+  const maxComputeInvocationsPerWorkgroup = adapter.limits.maxComputeInvocationsPerWorkgroup;
+  const maxBufferSize = adapter.limits.maxBufferSize;
+  const f32filterable = adapter.features.has("float32-filterable");
 
   // compute workgroup size 16*8*8 | 32*8*4 | 64*4*4 = 1024 threads if maxComputeInvocationsPerWorkgroup >= 1024, otherwise 16*4*4 = 256 threads
   const largeWg = maxComputeInvocationsPerWorkgroup >= 1024;
@@ -26,7 +26,7 @@ workgroup: [${wg_x}, ${wg_y}, ${wg_z}]</span>
 maxBufferSize: ${maxBufferSize}
 f32filterable: ${f32filterable}
 </pre>
-  `);
+    `);
     gpuInfo = true;
   }
 
@@ -41,8 +41,7 @@ f32filterable: ${f32filterable}
     }
   });
   device.addEventListener('uncapturederror', event => {
-    const msg = event.error.message;
-    if (msg.includes("max buffer size limit"))
+    if (event.error.message.includes("max buffer size limit"))
       alert(`Max buffer size exceeded. Your device supports max size ${maxBufferSize}, specified size ${simVoxelCount() * 4}`);
     // else alert(msg);
   });
@@ -74,49 +73,36 @@ f32filterable: ${f32filterable}
   // 3: texture_storage_3d r32float<r> speed
   // render 1 (new future), then switch 1 and 2 so that old present becomes past and old future becomes present
 
-  textures.stateTex0 = device.createTexture({
+  const newTexture = (name) => device.createTexture({
     size: simulationDomain,
     dimension: "3d",
     format: "r32float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
-    label: "state texture 0",
+    label: `${name} texture`
   });
-  textures.stateTex1 = device.createTexture({
-    size: simulationDomain,
-    dimension: "3d",
-    format: "r32float",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
-    label: "state texture 1",
-  });
-  textures.intensityTex = device.createTexture({
-    size: simulationDomain,
-    dimension: "3d",
-    format: "r32float",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
-    label: "intensity texture",
-  });
-  textures.speedTex = device.createTexture({
-    size: simulationDomain,
-    dimension: "3d",
-    format: "r32float",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
-    label: "wavespeed texture",
-  });
+
+  textures.stateTex0 = newTexture("state0");
+  textures.stateTex1 = newTexture("state1");
+  textures.intensityTex = newTexture("intensity");
+  textures.speedTex = newTexture("wavespeed");
   updateSpeedTexture();
 
   const uniformBuffer = uni.createBuffer(device);
 
+  const newComputePipeline = (shaderCode, name) =>
+    device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: device.createShaderModule({
+          code: shaderCode,
+          label: `${name} compute module`
+        }),
+        entryPoint: 'main'
+      },
+      label: `${name} compute pipeline`
+    });
 
-  const waveComputeModule = device.createShaderModule({
-    code: waveShaderCode(wg_x, wg_y, wg_z),
-    label: "wave compute module"
-  });
-
-  const waveComputePipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: { module: waveComputeModule, entryPoint: 'main' },
-    label: "wave compute pipeline"
-  });
+  const waveComputePipeline = newComputePipeline(waveShaderCode(wg_x, wg_y, wg_z), "wave");
 
   const waveComputeBindGroup = (tex0, tex1) => device.createBindGroup({
     layout: waveComputePipeline.getBindGroupLayout(0),
@@ -130,16 +116,12 @@ f32filterable: ${f32filterable}
     label: "wave compute bind group"
   });
 
-  const boundaryComputeModule = device.createShaderModule({
-    code: boundaryShaderCode(wg_x, wg_y, wg_z),
-    label: "boundary compute module"
-  });
+  const waveComputeBindGroups = [
+    waveComputeBindGroup(textures.stateTex0, textures.stateTex1),
+    waveComputeBindGroup(textures.stateTex1, textures.stateTex0)
+  ];
 
-  const boundaryComputePipeline = device.createComputePipeline({
-    layout: 'auto',
-    compute: { module: boundaryComputeModule, entryPoint: 'main' },
-    label: "boundary compute pipeline"
-  });
+  const boundaryComputePipeline = newComputePipeline(boundaryShaderCode(wg_x, wg_y, wg_z), "boundary");
 
   const boundaryComputeBindGroup = (tex0, tex1) => device.createBindGroup({
     layout: boundaryComputePipeline.getBindGroupLayout(0),
@@ -151,6 +133,11 @@ f32filterable: ${f32filterable}
     ],
     label: "boundary compute bind group"
   });
+
+  const boundaryComputeBindGroups = [
+    boundaryComputeBindGroup(textures.stateTex0, textures.stateTex1),
+    boundaryComputeBindGroup(textures.stateTex1, textures.stateTex0)
+  ];
 
   const renderModule = device.createShaderModule({
     code: renderShaderCode,
@@ -164,21 +151,14 @@ f32filterable: ${f32filterable}
   });
 
   const renderPipeline = device.createRenderPipeline({
-    label: '3d volume raycast pipeline',
+    label: '3d volume rendering pipeline',
     layout: 'auto',
-    vertex: {
-      module: renderModule,
-    },
+    vertex: { module: renderModule },
     fragment: {
       module: renderModule,
-      targets: [
-        {
-          format: swapChainFormat,
-        },
-      ],
+      targets: [{ format: swapChainFormat }],
     }
   });
-
 
   const renderBindGroup = (tex) => device.createBindGroup({
     layout: renderPipeline.getBindGroupLayout(0),
@@ -189,6 +169,12 @@ f32filterable: ${f32filterable}
       { binding: 3, resource: sampler },
     ],
   });
+
+  const renderBindGroups = [
+    renderBindGroup(textures.stateTex1),
+    renderBindGroup(textures.stateTex0),
+    renderBindGroup(textures.intensityTex)
+  ];
 
   const renderPassDescriptor = {
     label: 'render pass',
@@ -212,7 +198,8 @@ f32filterable: ${f32filterable}
     Math.ceil(simulationDomain[2] / wg_z)
   ]
 
-  let [tex0, tex1] = [textures.stateTex0, textures.stateTex1];
+  // let [tex0, tex1] = [textures.stateTex0, textures.stateTex1];
+  let pingPongIndex = 0;
 
   function render() {
     const startTime = performance.now();
@@ -254,7 +241,7 @@ f32filterable: ${f32filterable}
 
     const encoder = device.createCommandEncoder();
 
-    const run = dt > 0
+    const run = dt > 0;
 
     if (run) {
       if (!waveOn && waveSettings.amp > 0) {
@@ -290,22 +277,23 @@ f32filterable: ${f32filterable}
 
       const waveComputePass = waveComputeTimingHelper.beginComputePass(encoder);
       waveComputePass.setPipeline(waveComputePipeline);
-      waveComputePass.setBindGroup(0, waveComputeBindGroup(tex0, tex1));
+      waveComputePass.setBindGroup(0, waveComputeBindGroups[pingPongIndex]);
       waveComputePass.dispatchWorkgroups(...wgDispatchSize);
       waveComputePass.end();
 
       const boundaryComputePass = boundaryComputeTimingHelper.beginComputePass(encoder);
       boundaryComputePass.setPipeline(boundaryComputePipeline);
-      boundaryComputePass.setBindGroup(0, boundaryComputeBindGroup(tex0, tex1));
+      boundaryComputePass.setBindGroup(0, boundaryComputeBindGroups[pingPongIndex]);
       boundaryComputePass.dispatchWorkgroups(...wgDispatchSize);
       boundaryComputePass.end();
 
-      [tex0, tex1] = [tex1, tex0]; // swap ping pong textures
+      pingPongIndex = 1 - pingPongIndex;
+      // [tex0, tex1] = [tex1, tex0]; // swap ping pong textures
     }
 
     const renderPass = renderTimingHelper.beginRenderPass(encoder, renderPassDescriptor);
     renderPass.setPipeline(renderPipeline);
-    renderPass.setBindGroup(0, renderBindGroup(intensityFilterStrength > 0 ? textures.intensityTex : tex0));
+    renderPass.setBindGroup(0, renderBindGroups[intensityFilterStrength > 0 ? 2 : pingPongIndex]);
     renderPass.draw(3, 1, 0, 0);
     renderPass.end();
 
@@ -356,4 +344,4 @@ f32filterable: ${f32filterable}
 
 const camera = new Camera(defaults);
 
-main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, barrierThickness, { shape: shapes.circular, f: 192, nCutouts: 4 }));
+main().then(() => quadSymmetricFlatPreset(flatPresets.ZonePlate, presetXOffset, barrierThickness, presetSettings.ZonePlate));

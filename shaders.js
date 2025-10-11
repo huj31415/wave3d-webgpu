@@ -1,15 +1,4 @@
-const waveShaderCode = (wg_x, wg_y, wg_z) => /* wgsl */`
-${uni.uniformStruct}
-
-@group(0) @binding(0) var<uniform> uni: Uniforms;
-@group(0) @binding(1) var past_future:  texture_storage_3d<r32float, read_write>;
-@group(0) @binding(2) var present:      texture_storage_3d<r32float, read>;
-@group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
-@group(0) @binding(4) var intensity:    texture_storage_3d<r32float, read_write>;
-
-const WG_X: u32 = ${wg_x};
-const WG_Y: u32 = ${wg_y};
-const WG_Z: u32 = ${wg_z};
+/* 27 point stencil
 
 // const directions: array<vec3i, 26> = array<vec3i, 26>(
 //   // 00-05 orthogonal directions (cubic faces)
@@ -46,6 +35,20 @@ const WG_Z: u32 = ${wg_z};
 //   vec3i( 1,  1, -1), // xpypzn
 //   vec3i( 1,  1,  1), // xpypzp
 // );
+*/
+
+const waveShaderCode = (wg_x, wg_y, wg_z) => /* wgsl */`
+${uni.uniformStruct}
+
+@group(0) @binding(0) var<uniform> uni: Uniforms;
+@group(0) @binding(1) var past_future:  texture_storage_3d<r32float, read_write>;
+@group(0) @binding(2) var present:      texture_storage_3d<r32float, read>;
+@group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
+@group(0) @binding(4) var intensity:    texture_storage_3d<r32float, read_write>;
+
+const WG_X: u32 = ${wg_x};
+const WG_Y: u32 = ${wg_y};
+const WG_Z: u32 = ${wg_z};
 
 const directions: array<vec3i, 6> = array<vec3i, 6>(
   // 00-05 orthogonal directions (cubic faces)
