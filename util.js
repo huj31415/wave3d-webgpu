@@ -3,8 +3,8 @@
 // 16-19: vec3f cameraPos, f32 dt
 // 20-23: vec3f volSize, f32 rayDelta
 // 24-27: vec3f volSizeNorm, f32 waveOn
-// 28-31: vec2f resolution, f32 waveValue, f32 intensityFilter
-// 32-35: f32 intensityMultiplier, f32 waveSourceType, f32 global alpha multiplier, f32 +x projection alpha multiplier
+// 28-31: vec2f resolution, f32 waveValue, f32 energyFilter
+// 32-35: f32 energyMultiplier, f32 waveSourceType, f32 global alpha multiplier, f32 +x projection alpha multiplier
 // total 36 * f32 = 144 bytes
 
 const uni = new Uniforms();
@@ -17,8 +17,8 @@ uni.addUniform("volSizeNorm", "vec3f");   // normalized volume size (volSize / m
 uni.addUniform("waveOn", "f32");          // whether the wave is on or not
 uni.addUniform("resolution", "vec2f");    // canvas resolution: x-width, y-height
 uni.addUniform("waveValue", "f32");       // wave value at current time
-uni.addUniform("intensityFilter", "f32"); // intensity filter strength, 0 = off
-uni.addUniform("intensityMult", "f32");   // intensity rendering multiplier
+uni.addUniform("energyFilter", "f32"); // energy filter strength, 0 = off
+uni.addUniform("energyMult", "f32");   // energy rendering multiplier
 uni.addUniform("waveSourceType", "f32");  // source type: 0=plane, 1=point
 uni.addUniform("globalAlpha", "f32");     // global alpha multiplier
 uni.addUniform("plusXAlpha", "f32");      // +x face alpha multiplier
@@ -29,7 +29,7 @@ uni.finalize();
 const textures = {
   stateTex0: null,
   stateTex1: null,
-  intensityTex: null,
+  energyTex: null,
   speedTex: null,
 };
 
@@ -41,8 +41,8 @@ let dtPerFrame = 1;
 
 let waveOn = true;
 
-let defaultIntensityFilterStrength = 100;
-let intensityFilterStrength = defaultIntensityFilterStrength;
+let defaultEnergyFilterStrength = 100;
+let energyFilterStrength = defaultEnergyFilterStrength;
 
 const waveformOptions = Object.freeze({
   sine: 0,
@@ -133,7 +133,7 @@ function softReset() {
     { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
   );
   device.queue.writeTexture(
-    { texture: textures.intensityTex },
+    { texture: textures.energyTex },
     zeros,
     { offset: 0, bytesPerRow: simulationDomain[0] * 4, rowsPerImage: simulationDomain[1] },
     { width: simulationDomain[0], height: simulationDomain[1], depthOrArrayLayers: simulationDomain[2] },
@@ -303,18 +303,18 @@ const gui = new GUI("3D wave sim on WebGPU", canvas);
   gui.addGroup("visCtrl", "Visualization controls");
   gui.addNumericInput("globalAlpha", true, "Global alpha", { min: 0.1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.globalAlpha.set([value]), "Global alpha multiplier");
   gui.addNumericInput("rayDtMult", true, "Ray dt mult", { min: 0.1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.rayDtMult.set([value]), "Raymarching step multipler; higher has better visual quality, lower has better performance");
-  gui.addCheckbox("intensity", "Visualize intensity", true, "visCtrl", (checked) => {
-    intensityFilterStrength = checked ? defaultIntensityFilterStrength : 0;
-    uni.values.intensityFilter.set([intensityFilterStrength]);
+  gui.addCheckbox("energy", "Visualize energy", true, "visCtrl", (checked) => {
+    energyFilterStrength = checked ? defaultEnergyFilterStrength : 0;
+    uni.values.energyFilter.set([energyFilterStrength]);
   });
-  gui.addNumericInput("plusXAlpha", true, "+X intensity a", { min: 1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.plusXAlpha.set([value]), "+X intensity projection alpha multiplier");
-  gui.addNumericInput("intensityMult", true, "Intensity mult", { min: 0.01, max: 5, step: 0.01, val: 1, float: 2 }, "visCtrl", (value) => uni.values.intensityMult.set([value]), "Raw intensity value multiplier before transfer function");
-  gui.addNumericInput("intensityFilter", true, "Intensity filter", { min: 0, max: 3, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => {
+  gui.addNumericInput("plusXAlpha", true, "+X energy a", { min: 1, max: 5, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => uni.values.plusXAlpha.set([value]), "+X energy projection alpha multiplier");
+  gui.addNumericInput("energyMult", true, "Energy mult", { min: 0.01, max: 5, step: 0.01, val: 1, float: 2 }, "visCtrl", (value) => uni.values.energyMult.set([value]), "Raw energy value multiplier before transfer function");
+  gui.addNumericInput("energyFilter", true, "Energy filter", { min: 0, max: 3, step: 0.1, val: 2, float: 1 }, "visCtrl", (value) => {
     value = Math.pow(10, value);
-    defaultIntensityFilterStrength = value;
-    intensityFilterStrength = gui.io.intensity.checked ? defaultIntensityFilterStrength : 0;
-    uni.values.intensityFilter.set([value]);
-  }, "Intensity low pass filter strength");
+    defaultEnergyFilterStrength = value;
+    energyFilterStrength = gui.io.energy.checked ? defaultEnergyFilterStrength : 0;
+    uni.values.energyFilter.set([value]);
+  }, "Energy low pass filter strength");
 }
 
 // Camera keybinds

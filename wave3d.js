@@ -83,7 +83,7 @@ f32filterable: ${f32filterable}
 
   textures.stateTex0 = newTexture("state0");
   textures.stateTex1 = newTexture("state1");
-  textures.intensityTex = newTexture("intensity");
+  textures.energyTex = newTexture("energy");
   textures.speedTex = newTexture("wavespeed");
   updateSpeedTexture();
 
@@ -111,7 +111,7 @@ f32filterable: ${f32filterable}
       { binding: 1, resource: tex0.createView() },
       { binding: 2, resource: tex1.createView() },
       { binding: 3, resource: textures.speedTex.createView() },
-      { binding: 4, resource: textures.intensityTex.createView() },
+      { binding: 4, resource: textures.energyTex.createView() },
     ],
     label: "wave compute bind group"
   });
@@ -173,7 +173,7 @@ f32filterable: ${f32filterable}
   const renderBindGroups = [
     renderBindGroup(textures.stateTex1),
     renderBindGroup(textures.stateTex0),
-    renderBindGroup(textures.intensityTex)
+    renderBindGroup(textures.energyTex)
   ];
 
   const renderPassDescriptor = {
@@ -293,7 +293,7 @@ f32filterable: ${f32filterable}
 
     const renderPass = renderTimingHelper.beginRenderPass(encoder, renderPassDescriptor);
     renderPass.setPipeline(renderPipeline);
-    renderPass.setBindGroup(0, renderBindGroups[intensityFilterStrength > 0 ? 2 : pingPongIndex]);
+    renderPass.setBindGroup(0, renderBindGroups[energyFilterStrength > 0 ? 2 : pingPongIndex]);
     renderPass.draw(3, 1, 0, 0);
     renderPass.end();
 
@@ -330,8 +330,8 @@ f32filterable: ${f32filterable}
   uni.values.waveOn.set([1]);
   uni.values.rayDtMult.set([2]);
   uni.values.resolution.set([canvas.width, canvas.height]);
-  uni.values.intensityFilter.set([intensityFilterStrength]);
-  uni.values.intensityMult.set([1]);
+  uni.values.energyFilter.set([energyFilterStrength]);
+  uni.values.energyMult.set([1]);
   uni.values.waveSourceType.set([0]);
   uni.values.globalAlpha.set([2]);
   uni.values.plusXAlpha.set([2]);

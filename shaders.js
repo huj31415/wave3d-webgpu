@@ -44,7 +44,7 @@ ${uni.uniformStruct}
 @group(0) @binding(1) var past_future:  texture_storage_3d<r32float, read_write>;
 @group(0) @binding(2) var present:      texture_storage_3d<r32float, read>;
 @group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
-@group(0) @binding(4) var intensity:    texture_storage_3d<r32float, read_write>;
+@group(0) @binding(4) var energy:    texture_storage_3d<r32float, read_write>;
 
 const WG_X: u32 = ${wg_x};
 const WG_Y: u32 = ${wg_y};
@@ -87,7 +87,7 @@ fn main(
   let cdt = textureLoad(waveSpeed, gid).r * uni.dt;
   if (cdt <= 0) {
     textureStore(past_future, gid, vec4f(0));
-    textureStore(intensity, gid, vec4f(0));
+    textureStore(energy, gid, vec4f(0));
     return;
     // earlyReturn = true;
   }
@@ -177,10 +177,10 @@ fn main(
   // write to the past/future texture
   textureStore(past_future, gid, vec4f(newValue, 0.0, 0.0, 0.0));
 
-  // write to intensity texture (adds several ms to compute time)
-  if (uni.intensityFilter > 0) {
-    let current = textureLoad(intensity, gid);
-    textureStore(intensity, gid, current + (newValue * newValue - current) / uni.intensityFilter);
+  // write to energy texture (adds several ms to compute time)
+  if (uni.energyFilter > 0) {
+    let current = textureLoad(energy, gid);
+    textureStore(energy, gid, current + (newValue * newValue - current) / uni.energyFilter);
   }
 }
 `;
@@ -365,7 +365,7 @@ fn linear2srgb(color: vec4f) -> vec4f {
 // // Old alpha blending method, add to accumulated color
 // fn oldBlend(sampleColor: vec4f, accumulatedColor: vec4f) -> vec4f {
 //   return vec4f(sampleColor.rgb, 1) * (1.0 - accumulatedColor.a) * sampleColor.a;
-//   //  color *= select(1.0, 5.0, renderIntensity && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
+//   //  color *= select(1.0, 5.0, renderEnergy && samplePos.x >= 1 - uni.rayDtMult / uni.volSize.x);
 // }
 
 @fragment
@@ -399,8 +399,8 @@ fn fs(@location(0) fragCoord: vec2f) -> @location(0) vec4f {
   let rayDirNorm = rayDir / uni.volSizeNorm;
 
   var color = vec4f(0);
-  let renderIntensity = uni.intensityFilter > 0;
-  let intensityMult = select(1.0, uni.intensityMult, renderIntensity);
+  let renderEnergy = uni.energyFilter > 0;
+  let energyMult = select(1.0, uni.energyMult, renderEnergy);
   let plusXLimit = 1.0 - uni.rayDtMult / uni.volSize.x;
 
   var remainingDist = intersection.y - t0;
@@ -426,7 +426,7 @@ fn fs(@location(0) fragCoord: vec2f) -> @location(0) vec4f {
     }
 
     // Sample state
-    let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r * intensityMult;
+    let sampleValue = textureSampleLevel(stateTexture, stateSampler, samplePos, 0).r * energyMult;
 
     // Skip if empty and not a boundary
     if (sampleValue == 0.0 && speed == 1.0) {
@@ -441,10 +441,10 @@ fn fs(@location(0) fragCoord: vec2f) -> @location(0) vec4f {
     sampleColor += f32(speed != 1.0) * vec4f(min(abs(1.0 - speed), 0.05) * 6);
 
     // +X face emphasis
-    if (renderIntensity && samplePos.x >= plusXLimit) {
+    if (renderEnergy && samplePos.x >= plusXLimit) {
       sampleColor.a *= uni.plusXAlpha;
     }
-    // sampleColor.a *= 1 + f32(renderIntensity && samplePos.x >= plusXLimit) * (uni.plusXAlpha - 1);
+    // sampleColor.a *= 1 + f32(renderEnergy && samplePos.x >= plusXLimit) * (uni.plusXAlpha - 1);
 
     // Exponential blending
     color += (1.0 - color.a) * (1.0 - exp(-sampleColor.a * adjDt)) * vec4f(sampleColor.rgb, 1);
