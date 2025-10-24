@@ -37,7 +37,7 @@
 // );
 */
 
-const waveShaderCode = (wg_x, wg_y, wg_z) => /* wgsl */`
+const waveShaderCode = /* wgsl */`
 ${uni.uniformStruct}
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -46,9 +46,9 @@ ${uni.uniformStruct}
 @group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
 @group(0) @binding(4) var energy:    texture_storage_3d<r32float, read_write>;
 
-const WG_X: u32 = ${wg_x};
-const WG_Y: u32 = ${wg_y};
-const WG_Z: u32 = ${wg_z};
+override WG_X: u32;
+override WG_Y: u32;
+override WG_Z: u32;
 
 const directions: array<vec3i, 6> = array<vec3i, 6>(
   // 00-05 orthogonal directions (cubic faces)
@@ -186,7 +186,7 @@ fn main(
 `;
 
 
-const boundaryShaderCode = (wg_x, wg_y, wg_z) => /* wgsl */`
+const boundaryShaderCode = /* wgsl */`
 ${uni.uniformStruct}
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -194,9 +194,9 @@ ${uni.uniformStruct}
 @group(0) @binding(2) var present:      texture_storage_3d<r32float, read>;
 @group(0) @binding(3) var waveSpeed:    texture_storage_3d<r32float, read>;
 
-const WG_X: u32 = ${wg_x};
-const WG_Y: u32 = ${wg_y};
-const WG_Z: u32 = ${wg_z};
+override WG_X: u32;
+override WG_Y: u32;
+override WG_Z: u32;
 
 const directions: array<vec3i, 6> = array<vec3i, 6>(
   vec3i(-1, 0, 0), // left

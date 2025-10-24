@@ -97,12 +97,17 @@ f32filterable: ${f32filterable}
           code: shaderCode,
           label: `${name} compute module`
         }),
+        constants: {
+          WG_X: wg_x,
+          WG_Y: wg_y,
+          WG_Z: wg_z
+        },
         entryPoint: 'main'
       },
       label: `${name} compute pipeline`
     });
 
-  const waveComputePipeline = newComputePipeline(waveShaderCode(wg_x, wg_y, wg_z), "wave");
+  const waveComputePipeline = newComputePipeline(waveShaderCode, "wave");
 
   const waveComputeBindGroup = (tex0, tex1) => device.createBindGroup({
     layout: waveComputePipeline.getBindGroupLayout(0),
@@ -121,7 +126,7 @@ f32filterable: ${f32filterable}
     waveComputeBindGroup(textures.stateTex1, textures.stateTex0)
   ];
 
-  const boundaryComputePipeline = newComputePipeline(boundaryShaderCode(wg_x, wg_y, wg_z), "boundary");
+  const boundaryComputePipeline = newComputePipeline(boundaryShaderCode, "boundary");
 
   const boundaryComputeBindGroup = (tex0, tex1) => device.createBindGroup({
     layout: boundaryComputePipeline.getBindGroupLayout(0),
