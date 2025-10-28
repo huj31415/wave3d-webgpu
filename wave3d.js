@@ -32,8 +32,8 @@ f32filterable: ${f32filterable}
 
   device = await adapter?.requestDevice({
     requiredFeatures: [
-      (adapter.features.has("timestamp-query") ? "timestamp-query" : ""),
-      (f32filterable ? "float32-filterable" : ""),
+      ...(adapter.features.has("timestamp-query") ? ["timestamp-query"] : []),
+      ...(f32filterable ? ["float32-filterable"] : []),
     ],
     requiredLimits: {
       maxComputeInvocationsPerWorkgroup: maxComputeInvocationsPerWorkgroup,
@@ -212,31 +212,8 @@ f32filterable: ${f32filterable}
     const speedMultiplier = Math.min(deltaTime, 50);
     fps += (1e3 / deltaTime - fps) / filterStrength;
     lastFrameTime = startTime;
-
-    if (keyOrbit) {
-      const speed = KEY_ROT_SPEED * speedMultiplier;
-      camera.orbit(
-        (keyState.orbit.left - keyState.orbit.right) * speed,
-        (keyState.orbit.up - keyState.orbit.down) * speed
-      );
-    }
-    if (keyPan) {
-      const speed = KEY_PAN_SPEED * speedMultiplier;
-      camera.pan(
-        (keyState.pan.left - keyState.pan.right) * speed,
-        (keyState.pan.up - keyState.pan.down) * speed,
-        (keyState.pan.forward - keyState.pan.backward) * speed
-      );
-    }
-    if (keyZoom) {
-      camera.zoom((keyState.zoom.out - keyState.zoom.in) * KEY_ZOOM_SPEED * speedMultiplier);
-    }
-    if (keyFOV) {
-      camera.adjFOV((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * speedMultiplier);
-    }
-    if (keyFOVWithoutZoom) {
-      camera.adjFOVWithoutZoom((keyState.zoom.out - keyState.zoom.in) * KEY_FOV_SPEED * speedMultiplier);
-    }
+    
+    camera.handleInputs(speedMultiplier);
 
     const canvasTexture = context.getCurrentTexture();
     renderPassDescriptor.colorAttachments[0].view = canvasTexture.createView();
